@@ -1,5 +1,6 @@
+mod bank_parser;
 use std::{io::{Read, Write}, net::{SocketAddr, TcpListener, TcpStream}, thread};
-
+use std::process::exit;
 
 
 fn handle_client(mut stream: TcpStream, addr: SocketAddr) {
@@ -23,9 +24,31 @@ fn handle_client(mut stream: TcpStream, addr: SocketAddr) {
 }
 
 fn main() -> std::io::Result<()> {
-    let listener = TcpListener::bind("localhost:8080")?;
+
+    let (port, auth_file): (String, String) = match bank_parser::cli() {
+        Ok(matches) => {
+            let port = matches.value_of("port").unwrap_or_else(|| {
+                exit(255);
+            }).to_string();
+
+            let auth_file = matches.value_of("auth-file").unwrap_or_else(|| {
+                exit(255);
+            }).to_string();
+
+            (port, auth_file)
+        },
+        Err(_) => {
+            exit(255);
+        }
+    };
+
+    let listener = TcpListener::bind(String::from("localhost:") + &port).unwrap_or_else(|_| {
+        exit(255);
+    });
     println!("Bank listening on port 8080");
 
+    println!("{} {}",port, auth_file);
+    
     loop {
         //let (stream, addr) = listener.accept()?;
         match listener.accept() {

@@ -1,6 +1,7 @@
 use clap::{App, Arg, ArgGroup};
 
-pub fn parse_cli() -> Result<clap::ArgMatches, clap::Error> {
+
+pub fn cli() -> Result<clap::ArgMatches, clap::Error> {
     let matches = App::new("atm")
         .arg(
             Arg::with_name("auth-file")
@@ -64,4 +65,6 @@ pub fn parse_cli() -> Result<clap::ArgMatches, clap::Error> {
         .try_get_matches();
     matches
 }
+
+
 
