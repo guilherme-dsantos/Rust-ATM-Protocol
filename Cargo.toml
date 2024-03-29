@@ -7,14 +7,14 @@ edition = "2021"
 
 [dependencies]
 clap = "3.2.25"
-
-
+rsa = "0.9.6"
+rand = "0.8.5"
 
 [[bin]]
 name = "atm"
-path = "src/atm.rs"
+path = "src/atm/atm.rs"
 
 [[bin]]
 name = "bank"
-path = "src/bank.rs"
+path = "src/bank/bank.rs"
 

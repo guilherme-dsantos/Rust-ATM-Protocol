@@ -38,16 +38,22 @@ fn main() -> std::io::Result<()> {
     println!("{} {} {} {} {}", auth_file, ip_address, port, card_file, account);
 
     
-    let mut stream = TcpStream::connect("localhost:8080")?;
-    println!("Connected to server!");
+    let mut stream = TcpStream::connect(String::from("localhost:") + &port).unwrap_or_else(|_| {
+        exit(255);
+    });
 
+    println!("Connected to the bank!");
+
+    
+    
+    
     loop {
         let mut input = String::new();
         //Maybe validate input???? Check validator crate
         match std::io::stdin().read_line(&mut input) {
-            Ok(_) => {
-                println!("Correct input {}", input);
-            }
+            Ok(_) => 
+                println!("Correct input {}", input),
+            
             Err(_) => { 
                 println!("Incorrect input {}", input);    
                 continue; 
