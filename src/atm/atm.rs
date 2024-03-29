@@ -1,4 +1,6 @@
 mod atm_parser;
+mod operations;
+use operations::Operation;
 use std::{fs, io::{Read, Write}, net::TcpStream, path::Path};
 use std::process::exit;
 use rsa::{pkcs1::DecodeRsaPublicKey, RsaPublicKey};
@@ -39,84 +41,60 @@ fn create_card_file(file_path: &str) {
     if path.exists() {
         eprintln!("File already exists.");
         exit(255);
-    } else {
-        if let Err(_) = fs::write(path, "cardfile\n") {
-            eprintln!("Failed to write to file.");
-            exit(255);
-        }
+    } else if fs::write(path, "cardfile\n").is_err() {
+        eprintln!("Failed to write to file.");
+        exit(255);
     }
 }
 
 fn main() -> std::io::Result<()> {
 
-    let (auth_file, ip_address, port, card_file, account): (String, String, String, String, String) = match atm_parser::cli() {
+    let (auth_file, ip_address, port, card_file, account, operation): (String, String, String, String, String, Operation) = match atm_parser::cli() {
         Ok(matches) => {
             let auth_file = matches.value_of("auth-file").unwrap_or("src/bank/bank.auth").to_string(); //alterar para working directory
-
             let ip_address = matches.value_of("ip-address").unwrap_or("127.0.0.1").to_string();
-
             let port = matches.value_of("port").unwrap_or("3000").to_string();
-
-            /*let account = matches.value_of("account").unwrap_or_else(|| {
-                exit(251);
-            }).parse::<u32>().unwrap_or_else(|_| {
-                exit(252);
-            });*/
-            let account = matches.value_of("account").unwrap_or_else(|| {
-                exit(251);
-            }).to_string();
-
+            let account = matches.value_of("account").unwrap_or_else(|| { exit(251); }).to_string();
             let card_file = matches.value_of("card-file").map(|s| s.to_string()).unwrap_or(format!("{}{}", &account, ".card"));
-
             let operation = if matches.is_present("balance") {
-                "balance"
+                Operation::Balance(matches.value_of("balance").unwrap().to_string())
             } else if matches.is_present("deposit") {
-                "deposit"
+                Operation::Deposit(matches.value_of("deposit").unwrap().to_string())
             } else if matches.is_present("withdraw") {
-                "withdraw"
+                Operation::Withdraw(matches.value_of("withdraw").unwrap().to_string())
             } else if matches.is_present("get") {
-                "get"
+                Operation::Get(matches.value_of("get").unwrap().to_string())
             } else {
                 eprintln!("An operation must be specified.");
                 exit(254);
             };
-        
-            // Perform the operation based on the user input
-            match operation {
-                "balance" => {
-                    let balance = matches.value_of("balance").unwrap_or_else(|| {
-                        exit(251);
-                    }).to_string();
-                    validate_balance(balance);
-                    create_card_file(&card_file);
-                },
-                "deposit" => {
-                    // Handle deposit operation
-                },
-                "withdraw" => {
-                    // Handle withdraw operation
-                },
-                "get" => {
-                    // Handle get operation
-                },
-                _ => unreachable!(), // Since we've already checked for presence
-            }
-
-            (auth_file, ip_address, port, card_file, account)
+            (auth_file, ip_address, port, card_file, account, operation)
         },
         Err(_) => {
             exit(253);
         }
     };
 
-    let mut stream = TcpStream::connect(String::from("localhost:") + &port).unwrap_or_else(|_| {
-        exit(254);
-    });
-
-    println!("Connected to the bank!");
+    match operation {
+        Operation::Balance(balance) => {
+            validate_balance(balance);
+            create_card_file(&card_file);
+        },
+        Operation::Deposit(deposit) => {
+            // Handle deposit operation
+            println!("{}",deposit);
+        },
+        Operation::Withdraw(withdraw) => {
+            // Handle withdraw operation
+            println!("{}",withdraw);
+        },
+        Operation::Get(get) => {
+            // Handle get operation
+            println!("{}",get);
+        },
+    }
 
     //Read RSA Public Key From Bank.auth
-    //Chnage this later because the name can be different
     let file_path = Path::new(&auth_file);
     let string_path = file_path.to_str().unwrap_or_default();
     let extracted_public_key = match extract_public_key(string_path) {
@@ -127,8 +105,12 @@ fn main() -> std::io::Result<()> {
         } 
     };
 
-    println!("{:?}", extracted_public_key);
+    //Connect to the bank
+    let mut stream = TcpStream::connect(ip_address.to_owned() + &port).unwrap_or_else(|_| {
+        exit(254);
+    });
 
+    println!("{:?}", extracted_public_key);
     println!("{} {} {} {} {}", auth_file, ip_address, port, card_file, account);
     
     loop {
