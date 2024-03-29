@@ -1,6 +1,19 @@
 mod atm_parser;
-use std::{io::{Read, Write}, net::TcpStream};
+use std::{fs, io::{Read, Write}, net::TcpStream, path::Path};
 use std::process::exit;
+use rsa::{pkcs1::DecodeRsaPublicKey, RsaPublicKey};
+
+fn extract_public_key(file_path: &str) -> Result<RsaPublicKey,String> {
+    match fs::read_to_string(file_path) {
+        Ok(content) => {
+            let public_key = RsaPublicKey::from_pkcs1_pem(&content)
+                .map_err(|e| format!("Error parsing public key: {}", e))?;
+            Ok(public_key)
+        }
+        Err(err) => Err(format!("Error reading public key from file: {}", err)),
+    }
+
+}
 
 fn main() -> std::io::Result<()> {
 
@@ -35,17 +48,27 @@ fn main() -> std::io::Result<()> {
         }
     };
 
-    println!("{} {} {} {} {}", auth_file, ip_address, port, card_file, account);
-
-    
     let mut stream = TcpStream::connect(String::from("localhost:") + &port).unwrap_or_else(|_| {
         exit(255);
     });
 
     println!("Connected to the bank!");
 
-    
-    
+    //Read RSA Public Key From Bank.auth
+    //Chnage this later because the name can be different
+    let file_path = Path::new("bank.auth");
+    let string_path = file_path.to_str().unwrap_or_default();
+    let extracted_public_key = match extract_public_key(string_path) {
+        Ok(public_key) => public_key,
+        Err(err) => {
+            eprintln!("Error extracting public key: {}", err);
+            exit(255);
+        } 
+    };
+
+    println!("{:?}", extracted_public_key);
+
+    println!("{} {} {} {} {}", auth_file, ip_address, port, card_file, account);
     
     loop {
         let mut input = String::new();

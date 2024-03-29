@@ -1,7 +1,7 @@
 mod bank_parser;
 use std::{fs::{self}, io::{Read, Write}, net::{SocketAddr, TcpListener, TcpStream}, path::Path, thread};
 use std::process::exit;
-use rsa::{pkcs1::{DecodeRsaPublicKey, EncodeRsaPublicKey}, pkcs8::LineEnding, RsaPrivateKey, RsaPublicKey};
+use rsa::{pkcs1::EncodeRsaPublicKey, pkcs8::LineEnding, RsaPrivateKey, RsaPublicKey};
 
 fn handle_client(mut stream: TcpStream, addr: SocketAddr) {
     loop {
@@ -23,17 +23,7 @@ fn handle_client(mut stream: TcpStream, addr: SocketAddr) {
     }
 }
 
-fn extract_public_key(file_path: &str) -> Result<RsaPublicKey,String> {
-    match fs::read_to_string(file_path) {
-        Ok(content) => {
-            let public_key = RsaPublicKey::from_pkcs1_pem(&content)
-                .map_err(|e| format!("Error parsing public key: {}", e))?;
-            Ok(public_key)
-        }
-        Err(err) => Err(format!("Error reading public key from file: {}", err)),
-    }
 
-}
 
 fn main() -> std::io::Result<()> {
 
@@ -80,17 +70,6 @@ fn main() -> std::io::Result<()> {
     let public_key_pem = public_key.to_pkcs1_pem(LineEnding::CRLF).expect("Failed to covert public key to PEM");
     fs::write(file_path, public_key_pem).expect("Failed to write keys to file");
     
-    //Read RSA Public Key From Bank.auth
-    let string_path = file_path.to_str().unwrap_or_default();
-    let extracted_public_key = match extract_public_key(string_path) {
-        Ok(public_key) => public_key,
-        Err(err) => {
-            eprintln!("Error extracting public key: {}", err);
-            exit(255);
-        } 
-    };
-
-    println!("{:?}", extracted_public_key);
 
     let listener = TcpListener::bind(String::from("localhost:") + &port).unwrap_or_else(|_| {
         exit(255);
