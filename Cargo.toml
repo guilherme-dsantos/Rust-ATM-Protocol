@@ -9,6 +9,7 @@ edition = "2021"
 clap = "3.2.25"
 rsa = "0.9.6"
 rand = "0.8.5"
+regex = "1.5.4"
 
 [[bin]]
 name = "atm"

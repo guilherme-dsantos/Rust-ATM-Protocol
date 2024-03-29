@@ -29,13 +29,9 @@ fn main() -> std::io::Result<()> {
 
     let (port, auth_file): (String, String) = match bank_parser::cli() {
         Ok(matches) => {
-            let port = matches.value_of("port").unwrap_or_else(|| {
-                exit(255);
-            }).to_string();
+            let port = matches.value_of("port").unwrap_or("3000").to_string();
 
-            let auth_file = matches.value_of("auth-file").unwrap_or_else(|| {
-                exit(255);
-            }).to_string();
+            let auth_file = matches.value_of("auth-file").unwrap_or("src/bank/bank.auth").to_string();
 
             (port, auth_file)
         },
@@ -56,7 +52,7 @@ fn main() -> std::io::Result<()> {
     println!("{:?} {:?}",private_key, public_key);
 
     //Create bank.auth file, expects error if bank.auth exists
-    let file_path = Path::new("bank.auth");
+    let file_path = Path::new(&auth_file);
     if file_path.exists() {
         exit(255);
     } else {
