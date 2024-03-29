@@ -17,7 +17,7 @@ fn extract_public_key(file_path: &str) -> Result<RsaPublicKey,String> {
 }
 
 fn validate_balance(s: String){
-    let pattern = regex::Regex::new(r"^(0|[1-9][0-9]*)$").unwrap();
+    let pattern = regex::Regex::new(r"^(0|[1-9][0-9]*)\.[0-9]{2}$").unwrap();
     match pattern.is_match(&s) {
         true => {
             let value = f64::from_str(&s).unwrap_or_else(|_| {
@@ -29,8 +29,31 @@ fn validate_balance(s: String){
             }
         },
         false => {
-            exit(302);
+            eprintln!("Not a match");
+            exit(303);
         }
+    }
+}
+
+fn validate_ip_address(s: String){
+    println!("Validating IP: {}", &s);
+    let pattern = regex::Regex::new(r"^((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])$").unwrap();
+    if !pattern.is_match(&s){
+        println!("Regex pattern: {:?}", pattern);
+        eprintln!("{}", &s);
+        exit(252)
+    }
+}
+
+fn validate_port(s: String){
+    if let Ok(port) = s.parse::<u16>() { //u16 goes to 65535
+        if port < 1024{
+            eprintln!("Port number out of valid range (1024-65535).");
+            exit(259);
+        }
+    } else {
+        eprintln!("Invalid input: not a number or too big.");
+        exit(251);
     }
 }
 
@@ -54,8 +77,10 @@ fn main() -> std::io::Result<()> {
             let auth_file = matches.value_of("auth-file").unwrap_or("src/bank/bank.auth").to_string(); //alterar para working directory
 
             let ip_address = matches.value_of("ip-address").unwrap_or("127.0.0.1").to_string();
+            validate_ip_address(ip_address.clone());
 
             let port = matches.value_of("port").unwrap_or("3000").to_string();
+            validate_port(port.clone());
 
             /*let account = matches.value_of("account").unwrap_or_else(|| {
                 exit(251);
