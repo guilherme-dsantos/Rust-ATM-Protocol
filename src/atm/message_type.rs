@@ -5,6 +5,7 @@ use std::vec::Vec;
 pub(crate) enum MessageType {
     RegistrationRequest {
         ciphertext: Vec<u8>,
+        atm_public_key: Vec<u8>,
         hmac: Vec<u8>,
         nonce: String,
     },
@@ -22,13 +23,14 @@ impl fmt::Display for MessageType {
         match self {
             MessageType::RegistrationRequest {
                 ciphertext,
+                atm_public_key,
                 hmac,
                 nonce,
             } => {
                 write!(
                     f,
-                    "RegistrationRequest: ciphertext={:?}, hmac={:?}, nonce={}",
-                    ciphertext, hmac, nonce
+                    "RegistrationRequest: ciphertext={:?}, atm_public_key={:?}, hmac={:?}, nonce={}",
+                    ciphertext, atm_public_key, hmac, nonce
                 )
             }
             MessageType::RegistrationResponse {

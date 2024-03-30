@@ -14,7 +14,7 @@ use rsa::{
     pkcs1::{DecodeRsaPublicKey, EncodeRsaPublicKey},
     Pkcs1v15Encrypt, RsaPrivateKey, RsaPublicKey,
 };
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
 use std::process::exit;
 use std::str::FromStr;
 use std::vec::Vec;
@@ -174,7 +174,8 @@ fn main() -> std::io::Result<()> {
             };
             (auth_file, ip_address, port, card_file, account, operation)
         }
-        Err(_) => {
+        Err(e) => {
+            eprint!("Erro {}", e);
             exit(253);
         }
     };
@@ -209,6 +210,7 @@ fn main() -> std::io::Result<()> {
                 .strict(true);
             let pin = pg.generate_one().unwrap();
             let pin_bytes = pin.as_bytes();
+            /*
             let password_hash = Pbkdf2
                 .hash_password(pin_bytes, &salt)
                 .unwrap_or_else(|e| {
@@ -216,7 +218,13 @@ fn main() -> std::io::Result<()> {
                     exit(255);
                 })
                 .to_string();
-            let password_hash_bytes = password_hash.as_bytes();
+            */
+
+            let mut hasher = Sha256::new();
+            hasher.update(pin_bytes);
+            hasher.update(&salt.to_string());
+            let password_hash = hasher.finalize();
+            let password_hash_bytes = password_hash.to_vec();
 
             //Read RSA Public Key From Bank.auth
             let file_path = Path::new(&auth_file);
@@ -229,7 +237,6 @@ fn main() -> std::io::Result<()> {
             let serialized_data = serde_json::json!({
                 "id": account,
                 "hash": password_hash_bytes,
-                "atm_public_key" : atm_public_key_bytes,
             });
 
             let serialized_data_str =
@@ -241,13 +248,18 @@ fn main() -> std::io::Result<()> {
                 .expect("failed to encrypt");
             let mut hmac = HmacSha256::new_from_slice(enc_data.as_slice())
                 .expect("HMAC can take key of any size");
-            hmac.update(password_hash_bytes);
+            hmac.update(password_hash_bytes.as_slice());
+            hmac.update(atm_public_key_bytes.as_slice());
             let hmac_result_bytes: Vec<u8> = hmac.finalize().into_bytes().to_vec();
+            println!("{:?}", hmac_result_bytes);
             let registration_request = MessageType::RegistrationRequest {
                 ciphertext: enc_data,
+                atm_public_key: atm_public_key_bytes,
                 hmac: hmac_result_bytes,
                 nonce: nonce.to_string(),
             };
+
+            //Server vai ter que iterar o hash com por exemplo pbdfk2
             println!("{}", registration_request);
         }
         Operation::Deposit(deposit) => {
