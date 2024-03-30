@@ -32,39 +32,37 @@ pub fn cli() -> Result<clap::ArgMatches, clap::Error> {
                 .takes_value(true)
                 .required(true),
         )
-        .group(ArgGroup::with_name("operation")
-            .required(true)
-            .args(&["balance", "deposit", "withdraw", "get"]))
+        .group(
+            ArgGroup::with_name("operation")
+                .required(true)
+                .args(&["balance", "deposit", "withdraw", "get"]),
+        )
         .arg(
             Arg::with_name("balance")
                 .short('n')
                 .takes_value(true)
                 .requires("account")
-                .conflicts_with_all(&["deposit", "withdraw", "get"])
-                
+                .conflicts_with_all(&["deposit", "withdraw", "get"]),
         )
         .arg(
             Arg::with_name("deposit")
                 .short('d')
                 .takes_value(true)
                 .requires("account")
-                .conflicts_with_all(&["balance", "withdraw", "get"])
+                .conflicts_with_all(&["balance", "withdraw", "get"]),
         )
         .arg(
             Arg::with_name("withdraw")
                 .short('w')
                 .takes_value(true)
                 .requires("account")
-                .conflicts_with_all(&["balance", "deposit", "get"])
+                .conflicts_with_all(&["balance", "deposit", "get"]),
         )
         .arg(
             Arg::with_name("get")
                 .short('g')
-                .conflicts_with_all(&["balance", "deposit", "withdraw"])
+                .conflicts_with_all(&["balance", "deposit", "withdraw"]),
         )
         .try_get_matches();
     matches
 }
-
-
-
