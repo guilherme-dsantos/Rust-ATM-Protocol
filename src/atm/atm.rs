@@ -58,15 +58,42 @@ fn validate_port(s: String){
         exit(251);
     }
 }
+fn validate_account(account_name: String) {
+    /*if account_name == "." || account_name == ".." {
+        println!("Special account name is valid: {}", account_name);
+    } else {*/
+        let valid_pattern = regex::Regex::new(r"^[_\-\.0-9a-z]+$").unwrap();
+        let is_valid_length = account_name.len() >= 1 && account_name.len() <= 122;
+        let is_valid_name = valid_pattern.is_match(&account_name);
+
+        if is_valid_length && is_valid_name {
+            println!("Account name is valid: {}", account_name);
+        } else {
+            eprintln!("Invalid account name: {}", account_name);
+            exit(255);
+        }
+    //}
+}
+
+
+fn validate_file_name(file_name: String){
+    let valid_pattern = regex::Regex::new(r"^[_\-\.0-9a-z]+$").unwrap();
+    let is_valid_length = file_name.len() >= 1 && file_name.len() <= 127;
+    let is_valid_name = valid_pattern.is_match(&file_name);
+    let is_not_special = file_name != "." && file_name != "..";
+    if !(is_valid_length && is_valid_name && is_not_special) {
+        exit(277);
+    }
+}
 
 fn create_card_file(file_path: &str) {
     let path = Path::new(file_path);
     if path.exists() {
         eprintln!("File already exists.");
-        exit(255);
+        exit(279);
     } else if fs::write(path, "cardfile\n").is_err() {
         eprintln!("Failed to write to file.");
-        exit(255);
+        exit(278);
     }
 }
 
@@ -74,7 +101,8 @@ fn main() -> std::io::Result<()> {
 
     let (auth_file, ip_address, port, card_file, account, operation): (String, String, String, String, String, Operation) = match atm_parser::cli() {
         Ok(matches) => {
-            let auth_file = matches.value_of("auth-file").unwrap_or("src/bank/bank.auth").to_string(); //alterar para working directory
+            let auth_file = matches.value_of("auth-file").unwrap_or("bank.auth").to_string(); //alterar para working directory
+            validate_file_name(auth_file.clone());
             let ip_address = matches.value_of("ip-address").unwrap_or("127.0.0.1").to_string();
             validate_ip_address(ip_address.clone());
 
@@ -89,8 +117,11 @@ fn main() -> std::io::Result<()> {
             let account = matches.value_of("account").unwrap_or_else(|| {
                 exit(251);
             }).to_string();
+            validate_account(account.clone());
 
             let card_file = matches.value_of("card-file").map(|s| s.to_string()).unwrap_or(format!("{}{}", &account, ".card"));
+            validate_file_name(card_file.clone());
+
             let operation = if matches.is_present("balance") {
                 Operation::Balance(matches.value_of("balance").unwrap().to_string())
             } else if matches.is_present("deposit") {
