@@ -1,27 +1,30 @@
 use core::fmt;
 use serde::{Deserialize, Serialize};
 use std::vec::Vec;
-#[derive(Serialize, Deserialize)]
-pub(crate) enum MessageType {
+
+#[derive(Serialize, Deserialize, Clone)]
+pub enum MessageRequest {
     RegistrationRequest {
+        nonce: String,
         ciphertext: Vec<u8>,
         atm_public_key: Vec<u8>,
         hmac: Vec<u8>,
-        nonce: String,
-    },
-    RegistrationResponse {
-        success: String,
-        hash: String,
-        account_id: String,
-        hmac: String,
-        nonce: String,
     },
 }
 
-impl fmt::Display for MessageType {
+#[derive(Serialize, Deserialize, Clone)]
+pub enum MessageResponse {
+    RegistrationResponse {
+        success: bool,
+        ciphertext: Vec<u8>,
+        hmac: Vec<u8>,
+    },
+}
+
+impl fmt::Display for MessageRequest {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            MessageType::RegistrationRequest {
+            MessageRequest::RegistrationRequest {
                 ciphertext,
                 atm_public_key,
                 hmac,
@@ -33,19 +36,24 @@ impl fmt::Display for MessageType {
                     ciphertext, atm_public_key, hmac, nonce
                 )
             }
-            MessageType::RegistrationResponse {
+        }
+    }
+}
+
+impl fmt::Display for MessageResponse {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            MessageResponse::RegistrationResponse {
                 success,
-                hash,
-                account_id,
+                ciphertext,
                 hmac,
-                nonce,
             } => {
                 write!(
                     f,
-                    "RegistrationResponse: success={}, hash={}, account_id={}, hmac={}, nonce={}",
-                    success, hash, account_id, hmac, nonce
+                    "RegistrationResponse: success={}, ciphertext={:?}, hmac={:?}",
+                    success, ciphertext, hmac
                 )
-            } // Add other variants as needed
+            }
         }
     }
 }

@@ -1,4 +1,4 @@
-pub(crate) enum Operation {
+pub enum Operation {
     Balance(String),
     Deposit(String),
     Withdraw(String),

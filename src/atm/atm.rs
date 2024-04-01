@@ -1,30 +1,29 @@
-mod atm_parser;
-mod message_type;
-mod operations;
-use crate::message_type::MessageType;
-
+extern crate utils;
 use hmac::{Hmac, Mac};
-use operations::Operation;
-use passwords::PasswordGenerator;
-use pbkdf2::{
-    password_hash::{rand_core::OsRng, PasswordHasher, SaltString},
-    Pbkdf2,
-};
+use pbkdf2::password_hash::{rand_core::OsRng, SaltString};
+use rand::Rng;
 use rsa::{
     pkcs1::{DecodeRsaPublicKey, EncodeRsaPublicKey},
     Pkcs1v15Encrypt, RsaPrivateKey, RsaPublicKey,
 };
+use serde::Deserialize;
 use sha2::{Digest, Sha256};
-use std::process::exit;
-use std::str::FromStr;
-use std::vec::Vec;
 use std::{
-    fs,
-    io::{Read, Write},
+    fs::{self, OpenOptions},
+    io::Write,
     net::TcpStream,
     path::Path,
 };
+use std::{io::BufRead, str::FromStr};
+use std::{io::BufReader, process::exit};
+use std::{rc::Rc, vec::Vec};
 use textnonce::TextNonce;
+use utils::{
+    atm_parser,
+    message_type::{MessageRequest, MessageResponse},
+    operations::Operation,
+};
+
 type HmacSha256 = Hmac<Sha256>;
 
 fn extract_public_key(file_path: &str) -> Result<RsaPublicKey, String> {
@@ -180,6 +179,11 @@ fn main() -> std::io::Result<()> {
         }
     };
 
+    //Connect to the bank
+    let mut stream = TcpStream::connect(format!("{}:{}", ip_address, port)).unwrap_or_else(|_| {
+        exit(254);
+    });
+
     match operation {
         Operation::Balance(balance) => {
             validate_balance(&balance);
@@ -187,29 +191,21 @@ fn main() -> std::io::Result<()> {
 
             // Generate RSA keypair
             let bits = 2048;
-            let private_key =
+            let atm_private_key =
                 RsaPrivateKey::new(&mut rand::thread_rng(), bits).unwrap_or_else(|_| {
                     println!("Error generating RSA pair");
                     exit(255);
                 });
-            let atm_public_key = RsaPublicKey::from(&private_key);
+            let atm_public_key = RsaPublicKey::from(&atm_private_key);
             let atm_public_key_bytes = atm_public_key
                 .to_pkcs1_der()
                 .expect("Failed to serialize RSA public key to DER")
                 .into_vec();
             let nonce = TextNonce::new();
             let salt = SaltString::generate(&mut OsRng);
-            let pg = PasswordGenerator::new()
-                .length(16)
-                .numbers(true)
-                .lowercase_letters(false)
-                .uppercase_letters(false)
-                .symbols(false)
-                .spaces(false)
-                .exclude_similar_characters(false)
-                .strict(true);
-            let pin = pg.generate_one().unwrap();
-            let pin_bytes = pin.as_bytes();
+            let mut rng = rand::thread_rng();
+            let pin: u64 = rng.gen_range(1_000_000_000_000_000..10_000_000_000_000_000); //16 digit pin
+            let pin_bytes = pin.to_be_bytes();
             /*
             let password_hash = Pbkdf2
                 .hash_password(pin_bytes, &salt)
@@ -251,16 +247,86 @@ fn main() -> std::io::Result<()> {
             hmac.update(password_hash_bytes.as_slice());
             hmac.update(atm_public_key_bytes.as_slice());
             let hmac_result_bytes: Vec<u8> = hmac.finalize().into_bytes().to_vec();
-            println!("{:?}", hmac_result_bytes);
-            let registration_request = MessageType::RegistrationRequest {
+            let rc_hmac = Rc::new(hmac_result_bytes);
+            let rc_clone_hmac = Rc::clone(&rc_hmac);
+            let rc_hmac_value = Rc::try_unwrap(rc_hmac).unwrap_or_else(|data| (*data).clone());
+
+            //println!("{:?}", hmac_result_bytes);
+            let registration_request = MessageRequest::RegistrationRequest {
+                nonce: nonce.to_string(),
                 ciphertext: enc_data,
                 atm_public_key: atm_public_key_bytes,
-                hmac: hmac_result_bytes,
-                nonce: nonce.to_string(),
+                hmac: rc_hmac_value,
             };
 
+            let serialized_message =
+                serde_json::to_string(&registration_request).unwrap_or_else(|e| {
+                    eprint!("Error serializing message {}", e);
+                    exit(255);
+                });
+            println!("{}", serialized_message);
+            let serialized_with_newline = format!("{}\n", serialized_message);
+            stream
+                .write_all(serialized_with_newline.as_bytes())
+                .unwrap_or_else(|e| {
+                    eprint!("Error sending message {}", e);
+                    exit(255);
+                });
             //Server vai ter que iterar o hash com por exemplo pbdfk2
-            println!("{}", registration_request);
+            //println!("{}", registration_request);
+            println!("{}", pin);
+
+            let mut buffer = Vec::new();
+            let mut reader = BufReader::new(&stream);
+
+            let bytes_read = reader.read_until(b'\n', &mut buffer).unwrap();
+
+            if bytes_read == 0 {
+                println!("Connection closed");
+                exit(0);
+            }
+
+            match serde_json::from_slice::<MessageResponse>(&buffer) {
+                Ok(message) => match message {
+                    MessageResponse::RegistrationResponse {
+                        success,
+                        ciphertext,
+                        hmac,
+                    } => {
+                        if success {
+                            let decrypted_data = atm_private_key
+                                .decrypt(Pkcs1v15Encrypt, ciphertext.as_slice())
+                                .expect("Error decrypting message");
+
+                            //Deserialize decrypted data
+                            let account_data: AccountData =
+                                serde_json::from_slice(&decrypted_data).unwrap();
+                            println!("{:?}", account_data);
+
+                            //Clean buffer
+                            buffer.clear();
+
+                            //Recalculate HMAC for Integrity
+                            let rc_hmac_value = Rc::try_unwrap(rc_clone_hmac)
+                                .unwrap_or_else(|data| (*data).clone());
+                            if hmac != rc_hmac_value {
+                                eprintln!("Integrity attack detected");
+                                exit(255);
+                            }
+
+                            let mut file = OpenOptions::new().append(true).open(card_file).unwrap();
+                            let content = format!("{}\n{}", account, pin).to_string();
+                            if let Err(e) = writeln!(file, "{}", &content) {
+                                eprintln!("Couldn't write to file: {}", e);
+                            }
+                        }
+                    }
+                },
+                Err(e) => {
+                    eprint!("Error receiving bank message {}", e);
+                    exit(255);
+                }
+            }
         }
         Operation::Deposit(deposit) => {
             // Handle deposit operation
@@ -276,41 +342,12 @@ fn main() -> std::io::Result<()> {
         }
     }
 
-    //Connect to the bank
-    let mut stream = TcpStream::connect(ip_address.to_owned() + &port).unwrap_or_else(|_| {
-        exit(254);
-    });
-
-    loop {
-        let mut input = String::new();
-        //Maybe validate input???? Check validator crate
-        match std::io::stdin().read_line(&mut input) {
-            Ok(_) => println!("Correct input {}", input),
-
-            Err(_) => {
-                println!("Incorrect input {}", input);
-                continue;
-            }
-        }
-
-        stream.write_all(input.as_bytes())?;
-
-        let mut buffer = [0; 1024];
-        match stream.read(&mut buffer) {
-            Ok(size) => {
-                if size == 0 {
-                    println!("Client disconnected!");
-                    break;
-                }
-                println!("Received: {}", String::from_utf8_lossy(&buffer));
-            }
-            Err(err) => {
-                eprintln!("Error reading from server: {}", err);
-                // Handle the error here, potentially disconnect or retry
-                break;
-            }
-        }
-    }
-
     Ok(())
+}
+
+#[derive(Debug, Deserialize)]
+#[allow(dead_code)]
+pub struct AccountData {
+    id: String,
+    hash: Vec<u8>,
 }
