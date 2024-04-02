@@ -196,6 +196,14 @@ fn handle_client(
                         exit(255);
                     });
             }
+            MessageRequest::DepositRequest {
+                id,
+                nonce,
+                ciphertext,
+                hmac,
+            } => {
+                todo!()
+            }
         },
         Err(e) => {
             println!("Error {}", e);

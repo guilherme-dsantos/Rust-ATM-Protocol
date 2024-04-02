@@ -1,21 +1,24 @@
 extern crate utils;
+use aes::cipher::{StreamCipher, StreamCipherSeek};
+use ctr::Ctr64LE;
+
 use hmac::{Hmac, Mac};
 use pbkdf2::password_hash::{rand_core::OsRng, SaltString};
-use rand::Rng;
+use rand::{Rng, RngCore};
 use rsa::{
     pkcs1::{DecodeRsaPublicKey, EncodeRsaPublicKey},
     Pkcs1v15Encrypt, RsaPrivateKey, RsaPublicKey,
 };
-
 use sha2::{Digest, Sha256};
+use std::io::{self, BufReader};
+use std::process::exit;
 use std::{
-    fs::{self, OpenOptions},
+    fs::{self, File, OpenOptions},
     io::Write,
     net::TcpStream,
     path::Path,
 };
 use std::{io::BufRead, str::FromStr};
-use std::{io::BufReader, process::exit};
 use std::{rc::Rc, vec::Vec};
 use textnonce::TextNonce;
 use utils::{
@@ -23,6 +26,7 @@ use utils::{
     message_type::{MessageRequest, MessageResponse},
     operations::{AccountData, Operation},
 };
+use x25519_dalek::{EphemeralSecret, PublicKey};
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -110,7 +114,7 @@ fn create_card_file(file_path: &str) {
     if path.exists() {
         eprintln!("File already exists.");
         exit(279);
-    } else if fs::write(path, "cardfile\n").is_err() {
+    } else if fs::write(path, "").is_err() {
         eprintln!("Failed to write to file.");
         exit(278);
     }
@@ -140,11 +144,6 @@ fn main() -> std::io::Result<()> {
             let port = matches.value_of("port").unwrap_or("3000").to_string();
             validate_port(&port);
 
-            /*let account = matches.value_of("account").unwrap_or_else(|| {
-                exit(251);
-            }).parse::<u32>().unwrap_or_else(|_| {
-                exit(252);
-            });*/
             let account = matches
                 .value_of("account")
                 .unwrap_or_else(|| {
@@ -206,15 +205,6 @@ fn main() -> std::io::Result<()> {
             let mut rng = rand::thread_rng();
             let pin: u64 = rng.gen_range(1_000_000_000_000_000..10_000_000_000_000_000); //16 digit pin
             let pin_bytes = pin.to_be_bytes();
-            /*
-            let password_hash = Pbkdf2
-                .hash_password(pin_bytes, &salt)
-                .unwrap_or_else(|e| {
-                    eprint!("Error hashing password {}", e);
-                    exit(255);
-                })
-                .to_string();
-            */
 
             let mut hasher = Sha256::new();
             hasher.update(pin_bytes);
@@ -265,7 +255,7 @@ fn main() -> std::io::Result<()> {
                     eprint!("Error serializing message {}", e);
                     exit(255);
                 });
-            println!("{}", serialized_message);
+            //println!("{}", serialized_message);
             let serialized_with_newline = format!("{}\n", serialized_message);
             stream
                 .write_all(serialized_with_newline.as_bytes())
@@ -273,9 +263,6 @@ fn main() -> std::io::Result<()> {
                     eprint!("Error sending message {}", e);
                     exit(255);
                 });
-            //Server vai ter que iterar o hash com por exemplo pbdfk2
-            //println!("{}", registration_request);
-            println!("{}", pin);
 
             let mut buffer = Vec::new();
             let mut reader = BufReader::new(&stream);
@@ -287,51 +274,137 @@ fn main() -> std::io::Result<()> {
                 exit(0);
             }
 
-            match serde_json::from_slice::<MessageResponse>(&buffer) {
-                Ok(message) => match message {
-                    MessageResponse::RegistrationResponse {
-                        success,
-                        ciphertext,
-                        hmac,
-                    } => {
-                        if success {
-                            let decrypted_data = atm_private_key
-                                .decrypt(Pkcs1v15Encrypt, ciphertext.as_slice())
-                                .expect("Error decrypting message");
+            let message = serde_json::from_slice::<MessageResponse>(&buffer).unwrap();
 
-                            //Deserialize decrypted data
-                            let account_data: AccountData =
-                                serde_json::from_slice(&decrypted_data).unwrap();
-                            println!("{:?}", account_data);
+            if let MessageResponse::RegistrationResponse {
+                success,
+                ciphertext,
+                hmac,
+            } = message
+            {
+                if success {
+                    let decrypted_data = atm_private_key
+                        .decrypt(Pkcs1v15Encrypt, ciphertext.as_slice())
+                        .expect("Error decrypting message");
 
-                            //Clean buffer
-                            buffer.clear();
+                    //Deserialize decrypted data
+                    let account_data: AccountData =
+                        serde_json::from_slice(&decrypted_data).unwrap();
+                    println!("{:?}", account_data);
 
-                            //Check HMACs for Integrity
-                            let rc_hmac_value = Rc::try_unwrap(rc_clone_hmac)
-                                .unwrap_or_else(|data| (*data).clone());
-                            if hmac != rc_hmac_value {
-                                eprintln!("Integrity attack detected");
-                                exit(255);
-                            }
+                    //Clean buffer
+                    buffer.clear();
 
-                            let mut file = OpenOptions::new().append(true).open(card_file).unwrap();
-                            let content = format!("{}\n{}", account, pin).to_string();
-                            if let Err(e) = writeln!(file, "{}", &content) {
-                                eprintln!("Couldn't write to file: {}", e);
-                            }
-                        }
+                    //Check HMACs for Integrity
+                    let rc_hmac_value =
+                        Rc::try_unwrap(rc_clone_hmac).unwrap_or_else(|data| (*data).clone());
+                    if hmac != rc_hmac_value {
+                        eprintln!("Integrity attack detected");
+                        exit(255);
                     }
-                },
-                Err(e) => {
-                    eprint!("Error receiving bank message {}", e);
-                    exit(255);
+
+                    let mut file = OpenOptions::new().append(true).open(card_file).unwrap();
+                    let content = format!("{}\n{}", pin, salt).to_string();
+                    if let Err(e) = writeln!(file, "{}", &content) {
+                        eprintln!("Couldn't write to file: {}", e);
+                    }
                 }
+            } else {
+                println!("Received wrong message!");
             }
         }
         Operation::Deposit(deposit) => {
-            // Handle deposit operation
+            let csprng = rand::thread_rng();
+            let client_secret = EphemeralSecret::random_from_rng(csprng);
+            let client_dh_public = PublicKey::from(&client_secret);
+
+            let nonce = TextNonce::new();
+            let rc_nonce = Rc::new(nonce);
+            
+            let rc_clone_nonce = Rc::clone(&rc_nonce);
+            let rc_clone2_nonce = Rc::clone(&rc_nonce);
+            let rc_clone_nonce_value =
+                Rc::try_unwrap(rc_clone_nonce).unwrap_or_else(|data| (*data).clone());
+            let rc_clone2_nonce_value =
+                Rc::try_unwrap(rc_clone2_nonce).unwrap_or_else(|data| (*data).clone());
+
+            let path = Path::new(&card_file);
+            let file = File::open(path)?;
+            let reader = io::BufReader::new(file);
+
+            let mut lines = reader.lines();
+            let pin = lines.next().unwrap().unwrap();
+            let salt = lines.next().unwrap().unwrap();
+
+            println!("{} {}", pin, salt);
+
             println!("{}", deposit);
+            let pin64: u64 = pin.parse().expect("Failed to parse string to u64");
+            let pin_bytes = pin64.to_be_bytes();
+            let mut hasher = Sha256::new();
+            hasher.update(pin_bytes);
+            hasher.update(&salt);
+            let password_hash = hasher.finalize();
+            let password_hash_bytes: Vec<u8> = password_hash.to_vec();
+
+            let serialized_data = serde_json::json!({
+                "hash": password_hash_bytes,
+                "deposit" : deposit,
+            });
+
+            let ciphertext =
+                serde_json::to_string(&serialized_data).expect("Failed to serialize data to JSON");
+
+            let rc_ciphertext = Rc::new(ciphertext);
+            let rc_clone_ciphertext = Rc::clone(&rc_ciphertext);
+            let rc_clone2_ciphertext = Rc::clone(&rc_ciphertext);
+            let rc_clone3_ciphertext = Rc::clone(&rc_ciphertext);
+            let rc_clone_ciphertext_value =
+                Rc::try_unwrap(rc_clone_ciphertext).unwrap_or_else(|data| (*data).clone());
+            let rc_clone2_ciphertext_value =
+                Rc::try_unwrap(rc_clone2_ciphertext).unwrap_or_else(|data| (*data).clone());
+            let rc_clone3_ciphertext_value =
+                Rc::try_unwrap(rc_clone3_ciphertext).unwrap_or_else(|data| (*data).clone());
+
+            let password_to_bytes: [u8; 16] = password_hash_bytes[0..16].try_into().unwrap();
+            let nonce_to_bytes: [u8; 16] = rc_clone_nonce_value.into_string().into_bytes()[0..16]
+                .try_into()
+                .unwrap();
+
+            let mut cipher = <Ctr64LE<aes::Aes128> as cipher::KeyIvInit>::new(
+                (&password_to_bytes).into(),
+                &nonce_to_bytes.into(),
+            );
+
+            cipher.apply_keystream(&mut rc_clone_ciphertext_value.into_bytes());
+
+            let mut hmac =
+                HmacSha256::new_from_slice(rc_clone3_ciphertext_value.to_string().as_bytes())
+                    .expect("HMAC can take key of any size");
+            hmac.update(password_hash_bytes.as_slice());
+            hmac.update(account.as_bytes());
+
+            let hmac_result_bytes: Vec<u8> = hmac.finalize().into_bytes().to_vec();
+
+            let deposit_request = MessageRequest::DepositRequest {
+                id: account,
+                nonce: rc_clone2_nonce_value.to_string(),
+                ciphertext: rc_clone2_ciphertext_value.into_bytes(),
+                hmac: hmac_result_bytes,
+            };
+
+            let serialized_message = serde_json::to_string(&deposit_request).unwrap_or_else(|e| {
+                eprint!("Error serializing message {}", e);
+                exit(255);
+            });
+            //println!("{}", serialized_message);
+            let serialized_with_newline = format!("{}\n", serialized_message);
+            stream
+                .write_all(serialized_with_newline.as_bytes())
+                .unwrap_or_else(|e| {
+                    eprint!("Error sending message {}", e);
+                    exit(255);
+                });
         }
         Operation::Withdraw(withdraw) => {
             // Handle withdraw operation
