@@ -18,6 +18,7 @@ sha2 = "0.10.8"
 base64 = "0.22.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0.115"
+x25519-dalek = "2"
 
 [[bin]]
 name = "atm"

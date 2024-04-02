@@ -74,15 +74,6 @@ fn handle_client(
                 let recalculated_hmac_result_bytes: Vec<u8> =
                     recalculated_hmac.finalize().into_bytes().to_vec();
 
-                //Why im doing this I can just use decrypted_data
-                /*let serialized_data = serde_json::json!({
-                    "id": account_id,
-                    "hash": hashed_password,
-                });
-                let serialized_data_str = serde_json::to_string(&serialized_data)
-                    .expect("Failed to serialize data to JSON");
-                */
-
                 //Encrypt with ATM Public Key
                 let mut rng = rand::thread_rng();
                 let received_atm_public_key = RsaPublicKey::from_pkcs1_der(&atm_public_key)
@@ -242,7 +233,6 @@ fn main() -> std::io::Result<()> {
 
     let bank_public_key = RsaPublicKey::from(&bank_private_key);
     let arc_bank_private_key = Arc::new(bank_private_key);
-    //println!("{:?} {:?}", private_key, public_key);
 
     //Create bank.auth file, expects error if bank.auth exists
     let file_path = Path::new(&auth_file);
@@ -259,7 +249,7 @@ fn main() -> std::io::Result<()> {
         }
     }
 
-    //Write RSA Public Key to Bank.auth
+    //Write RSA Public Key to .auth file
     let public_key_pem = bank_public_key
         .to_pkcs1_pem(LineEnding::CRLF)
         .expect("Failed to covert public key to PEM");
@@ -271,7 +261,6 @@ fn main() -> std::io::Result<()> {
     });
 
     loop {
-        //let (stream, addr) = listener.accept()?;
         match listener.accept() {
             Ok((stream, addr)) => {
                 println!("ATM connected from {}", addr);
