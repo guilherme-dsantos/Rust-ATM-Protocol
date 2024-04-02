@@ -6,7 +6,7 @@ use rsa::{
     pkcs1::{DecodeRsaPublicKey, EncodeRsaPublicKey},
     Pkcs1v15Encrypt, RsaPrivateKey, RsaPublicKey,
 };
-use serde::Deserialize;
+
 use sha2::{Digest, Sha256};
 use std::{
     fs::{self, OpenOptions},
@@ -21,7 +21,7 @@ use textnonce::TextNonce;
 use utils::{
     atm_parser,
     message_type::{MessageRequest, MessageResponse},
-    operations::Operation,
+    operations::{AccountData, Operation},
 };
 
 type HmacSha256 = Hmac<Sha256>;
@@ -233,6 +233,7 @@ fn main() -> std::io::Result<()> {
             let serialized_data = serde_json::json!({
                 "id": account,
                 "hash": password_hash_bytes,
+                "balance" : balance,
             });
 
             let serialized_data_str =
@@ -306,7 +307,7 @@ fn main() -> std::io::Result<()> {
                             //Clean buffer
                             buffer.clear();
 
-                            //Recalculate HMAC for Integrity
+                            //Check HMACs for Integrity
                             let rc_hmac_value = Rc::try_unwrap(rc_clone_hmac)
                                 .unwrap_or_else(|data| (*data).clone());
                             if hmac != rc_hmac_value {
@@ -343,11 +344,4 @@ fn main() -> std::io::Result<()> {
     }
 
     Ok(())
-}
-
-#[derive(Debug, Deserialize)]
-#[allow(dead_code)]
-pub struct AccountData {
-    id: String,
-    hash: Vec<u8>,
 }

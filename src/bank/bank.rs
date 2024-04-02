@@ -2,7 +2,7 @@ extern crate utils;
 use rsa::pkcs1::DecodeRsaPublicKey;
 use rsa::Pkcs1v15Encrypt;
 use rsa::{pkcs1::EncodeRsaPublicKey, pkcs8::LineEnding, RsaPrivateKey, RsaPublicKey};
-use serde::Deserialize;
+
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::process::exit;
@@ -17,6 +17,7 @@ use std::{
 use utils::{
     bank_parser,
     message_type::{MessageRequest, MessageResponse},
+    operations::AccountData,
 };
 type HmacSha256 = Hmac<Sha256>;
 use hmac::{Hmac, Mac};
@@ -26,7 +27,8 @@ fn handle_client(
     mut stream: TcpStream,
     _addr: SocketAddr,
     bank_private_key: Arc<RsaPrivateKey>,
-    database: Arc<Mutex<HashMap<String, Vec<u8>>>>,
+    users_table: Arc<Mutex<HashMap<String, Vec<u8>>>>,
+    balance_table: Arc<Mutex<HashMap<String, f64>>>,
     nonces: Arc<Mutex<Vec<String>>>,
 ) {
     let mut buffer = Vec::new();
@@ -39,7 +41,7 @@ fn handle_client(
         return;
     }
     match serde_json::from_slice::<MessageRequest>(&buffer) {
-        Ok(message) => match message.clone() {
+        Ok(message) => match message {
             MessageRequest::RegistrationRequest {
                 ciphertext,
                 atm_public_key,
@@ -56,8 +58,12 @@ fn handle_client(
                 println!("{:?}", account_data);
                 let account_id: String = account_data.id;
                 let hashed_password = account_data.hash;
+                let balance = account_data.balance;
+                let balancef64: f64 = balance.parse().unwrap_or_else(|e| {
+                    eprintln!("Error parsing string to f64 {}", e);
+                    exit(255);
+                });
 
-                //Clean buffer
                 buffer.clear();
 
                 //Recalculate HMAC for Integrity
@@ -136,14 +142,38 @@ fn handle_client(
                     return;
                 }
 
-                //Check if account is already registred
-                let mut locked_database = database.lock().unwrap();
+                let rc_account_id = Rc::new(account_id);
+                let rc_clone_account = Rc::clone(&rc_account_id);
+                let rc_value_clone_account =
+                    Rc::try_unwrap(rc_account_id).unwrap_or_else(|data| (*data).clone());
+                let rc_value_clone_account2 =
+                    Rc::try_unwrap(rc_clone_account).unwrap_or_else(|data| (*data).clone());
+
+                //Check if account is already registred, register account if not
+                let mut locked_users_table = users_table.lock().unwrap();
                 if let std::collections::hash_map::Entry::Vacant(e) =
-                    locked_database.entry(account_id)
+                    locked_users_table.entry(rc_value_clone_account)
                 {
                     e.insert(hashed_password);
+                    println!("{}", balancef64);
                 } else {
                     eprintln!("Account already registred");
+                    stream
+                        .write_all(serialized_bad_with_newline.as_bytes())
+                        .unwrap_or_else(|e| {
+                            eprint!("Error sending message {}", e);
+                            exit(255);
+                        });
+                    return;
+                }
+
+                let mut locked_balance_table = balance_table.lock().unwrap();
+                if let std::collections::hash_map::Entry::Vacant(e) =
+                    locked_balance_table.entry(rc_value_clone_account2)
+                {
+                    e.insert(balancef64);
+                    println!("{}", balancef64);
+                } else {
                     stream
                         .write_all(serialized_bad_with_newline.as_bytes())
                         .unwrap_or_else(|e| {
@@ -183,7 +213,8 @@ fn handle_client(
 }
 
 fn main() -> std::io::Result<()> {
-    let user_database: Arc<Mutex<HashMap<String, Vec<u8>>>> = Arc::new(Mutex::new(HashMap::new()));
+    let users_table: Arc<Mutex<HashMap<String, Vec<u8>>>> = Arc::new(Mutex::new(HashMap::new()));
+    let balance_table: Arc<Mutex<HashMap<String, f64>>> = Arc::new(Mutex::new(HashMap::new()));
     let nonces = Arc::new(Mutex::new(Vec::<String>::new()));
 
     let (port, auth_file): (String, String) = match bank_parser::cli() {
@@ -245,14 +276,16 @@ fn main() -> std::io::Result<()> {
             Ok((stream, addr)) => {
                 println!("ATM connected from {}", addr);
                 let clone_bank_private_key = Arc::clone(&arc_bank_private_key);
-                let clone_database = Arc::clone(&user_database);
+                let clone_users_table = Arc::clone(&users_table);
+                let clone_balance_table = Arc::clone(&balance_table);
                 let clone_nonces = Arc::clone(&nonces);
                 let _ = thread::spawn(move || {
                     handle_client(
                         stream,
                         addr,
                         clone_bank_private_key,
-                        clone_database,
+                        clone_users_table,
+                        clone_balance_table,
                         clone_nonces,
                     )
                 });
@@ -263,10 +296,4 @@ fn main() -> std::io::Result<()> {
             }
         }
     }
-}
-
-#[derive(Debug, Deserialize)]
-pub struct AccountData {
-    id: String,
-    hash: Vec<u8>,
 }
