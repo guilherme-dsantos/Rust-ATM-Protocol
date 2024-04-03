@@ -12,9 +12,8 @@ pub enum MessageRequest {
     },
     DepositRequest {
         id: String,
-        nonce: String,
+        nonce: Vec<u8>,
         ciphertext: Vec<u8>,
-        hmac: Vec<u8>,
     },
 }
 
@@ -50,7 +49,6 @@ impl fmt::Display for MessageRequest {
                 id: _,
                 nonce: _,
                 ciphertext: _,
-                hmac: _,
             } => todo!(),
         }
     }

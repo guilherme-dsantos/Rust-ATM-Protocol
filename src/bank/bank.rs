@@ -1,6 +1,11 @@
 extern crate utils;
-
+use aes_gcm_siv::{
+    aead::{Aead, KeyInit},
+    Aes256GcmSiv,
+    Nonce, // Or `Aes128GcmSiv`
+};
 use blake3::Hasher;
+use cipher::generic_array::GenericArray;
 use rsa::{
     pkcs1::DecodeRsaPublicKey, pkcs1::EncodeRsaPublicKey, pkcs8::LineEnding, Pkcs1v15Encrypt,
     RsaPrivateKey, RsaPublicKey,
@@ -37,7 +42,6 @@ fn handle_client(
     let bytes_read = reader.read_until(b'\n', &mut buffer).unwrap();
 
     if bytes_read == 0 {
-        println!("Connection closed");
         return;
     }
     match serde_json::from_slice::<MessageRequest>(&buffer) {
@@ -192,12 +196,47 @@ fn handle_client(
                 id,
                 nonce,
                 ciphertext,
-                hmac,
             } => {
-                //Get password of the user
-                let locked_user_table = users_table.lock().unwrap();
-                let hashed_password = locked_user_table.get(&id).unwrap();
-                let password_to_bytes: [u8; 16] = hashed_password[0..16].try_into().unwrap();
+                //Get user's password
+                let locked_user_table = users_table.lock().unwrap_or_else(|e| {
+                    eprint!("Error accessing users table {}", e);
+                    exit(255);
+                });
+
+                let hashed_password = locked_user_table
+                    .get(&id)
+                    .unwrap_or_else(|| {
+                        eprint!("ID Account doesn't exist");
+                        exit(255);
+                    })
+                    .to_owned();
+
+                if !locked_user_table.contains_key(&id) {
+                    eprintln!("Received invalid message from ATM, maybe MITM...");
+                    exit(255);
+                }
+                //Get user's balance
+                let locked_balance_table = balance_table.lock().unwrap();
+                let user_balance = locked_balance_table
+                    .get(&id)
+                    .unwrap_or_else(|| {
+                        eprint!("ID Account doesn't exist");
+                        exit(255);
+                    })
+                    .to_owned();
+
+                // Use the hash as a key for AES256-GCM-SIV
+                let aes_gcm_key = GenericArray::from_slice(&hashed_password);
+                let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
+                let aes_gcm_nonce = Nonce::from_slice(&nonce); // 96-bits; unique per message
+                let plaintext = aes_gcm_cipher
+                    .decrypt(aes_gcm_nonce, ciphertext.as_ref())
+                    .unwrap_or_else(|e| {
+                        eprint!("Error decrypting {}", e);
+                        exit(255);
+                    });
+
+                println!("{:?}", plaintext);
             }
         },
         Err(e) => {
@@ -281,8 +320,7 @@ fn main() -> std::io::Result<()> {
                     )
                 });
             }
-            Err(err) => {
-                println!("Couldn't accept ATM request {}", err);
+            Err(_) => {
                 continue;
             }
         }

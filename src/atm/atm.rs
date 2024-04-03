@@ -8,6 +8,7 @@ use aes_gcm_siv::{
 
 use blake3::Hasher;
 use cipher::generic_array::GenericArray;
+use pbkdf2::password_hash::{rand_core::OsRng, SaltString};
 use rand::{Rng, RngCore};
 use rsa::{
     pkcs1::{DecodeRsaPublicKey, EncodeRsaPublicKey},
@@ -63,7 +64,7 @@ fn extract_public_key(file_path: &str) -> Result<RsaPublicKey, String> {
     }
 }*/
 
-fn validate_number(s: &str, balance:bool) {
+fn validate_number(s: &str, balance: bool) {
     let pattern = regex::Regex::new(r"^(0|[1-9][0-9]*)\.[0-9]{2}$").unwrap();
     match pattern.is_match(s) {
         true => {
@@ -71,18 +72,16 @@ fn validate_number(s: &str, balance:bool) {
                 eprintln!("Failed to parse balance as a float.");
                 exit(252);
             });
-            if value < 0.00 || value > 4294967295.99 {
-                exit(302);
+            if !(0.00..=4294967295.99).contains(&value) {
+                exit(225);
             }
-            if balance{
-                if value < 10.00 {
-                    exit(301);
-                }
+            if balance && value < 10.00 {
+                exit(225);
             }
         }
         false => {
             eprintln!("Not a match");
-            exit(303);
+            exit(225);
         }
     }
 }
@@ -90,7 +89,6 @@ fn validate_number(s: &str, balance:bool) {
 fn validate_ip_address(s: &str) {
     let pattern = regex::Regex::new(r"^((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])$").unwrap();
     if !pattern.is_match(s) {
-        println!("Regex pattern: {:?}", pattern);
         eprintln!("{}", &s);
         exit(252)
     }
@@ -226,8 +224,7 @@ fn main() -> std::io::Result<()> {
             let nonce = TextNonce::new();
 
             //Generate salt to prevent rainbow-table attacks
-            let mut salt = [0u8; 32];
-            rand::thread_rng().fill_bytes(&mut salt);
+            let salt = SaltString::generate(&mut OsRng);
 
             //Generate a strong random 16 digit pin
             let mut rng = rand::thread_rng();
@@ -237,7 +234,7 @@ fn main() -> std::io::Result<()> {
             //Generate the hash(pin + salt)
             let mut hasher = blake3::Hasher::new();
             hasher.update(&pin_bytes);
-            hasher.update(&salt);
+            hasher.update(salt.to_string().as_bytes());
             let password_hash = hasher.finalize();
             let password_hash_slice = password_hash.as_bytes();
 
@@ -349,7 +346,7 @@ fn main() -> std::io::Result<()> {
 
                     create_card_file(&card_file);
                     let mut file = OpenOptions::new().append(true).open(card_file).unwrap();
-                    let content = format!("{}\n{:?}", pin, salt).to_string();
+                    let content = format!("{}\n{}", pin, salt.to_string().replace('"', ""));
                     if let Err(e) = writeln!(file, "{}", &content) {
                         eprintln!("Couldn't write to file: {}", e);
                     }
@@ -366,30 +363,21 @@ fn main() -> std::io::Result<()> {
             println!("{}", json_result);
         }
         Operation::Deposit(deposit) => {
+            //Generate ATM DH Public Key
             let csprng = rand::thread_rng();
             let client_secret = EphemeralSecret::random_from_rng(csprng);
             let client_dh_public = PublicKey::from(&client_secret);
 
-            let nonce = TextNonce::new();
-            let rc_nonce = Rc::new(nonce);
-
-            let rc_clone_nonce = Rc::clone(&rc_nonce);
-            let rc_clone2_nonce = Rc::clone(&rc_nonce);
-            let rc_clone_nonce_value =
-                Rc::try_unwrap(rc_clone_nonce).unwrap_or_else(|data| (*data).clone());
-            let rc_clone2_nonce_value =
-                Rc::try_unwrap(rc_clone2_nonce).unwrap_or_else(|data| (*data).clone());
-
+            //Read PIN and Salt from card
             let path = Path::new(&card_file);
             let file = File::open(path)?;
             let reader = io::BufReader::new(file);
-
             let mut lines = reader.lines();
             let pin = lines.next().unwrap().unwrap();
             let salt = lines.next().unwrap().unwrap();
-
             let pin64: u64 = pin.parse().expect("Failed to parse string to u64");
 
+            //Generate hashed password from PIN and Salt
             let pin_bytes = pin64.to_be_bytes();
             let mut hasher = blake3::Hasher::new();
             hasher.update(&pin_bytes);
@@ -398,60 +386,45 @@ fn main() -> std::io::Result<()> {
             let password_hash_bytes = password_hash.to_string().into_bytes();
             let client_dh_public_to_bytes = client_dh_public.to_bytes().to_vec();
 
+            //Serialized data to encrypt later
             let serialized_data = serde_json::json!({
+                "id": account,
                 "dh_uk" : client_dh_public_to_bytes,
                 "hash": password_hash_bytes,
                 "deposit" : deposit,
             });
-
             let serialized_data_to_encrypt =
                 serde_json::to_string(&serialized_data).expect("Failed to serialize data to JSON");
 
-            let rc_serialized_data_to_encrypt = Rc::new(serialized_data_to_encrypt);
-            let rc_clone_serialized_data_to_encrypt = Rc::clone(&rc_serialized_data_to_encrypt);
-            let rc_clone2_serialized_data_to_encrypt = Rc::clone(&rc_serialized_data_to_encrypt);
-            let rc_clone_serialized_data_to_encrypt_value =
-                Rc::try_unwrap(rc_clone_serialized_data_to_encrypt)
-                    .unwrap_or_else(|data| (*data).clone());
-            let rc_clone2_serialized_data_to_encrypt_value =
-                Rc::try_unwrap(rc_clone2_serialized_data_to_encrypt)
-                    .unwrap_or_else(|data| (*data).clone());
+            // Generate a 12-byte nonce
+            let mut nonce = [0u8; 12];
+            rand::thread_rng().fill_bytes(&mut nonce);
 
             // Use the hash as a key for AES256-GCM-SIV
-            let key = GenericArray::from_slice(password_hash.as_bytes());
-            let cipher = Aes256GcmSiv::new(key);
-            let aes_nonce = Nonce::from_slice(rc_clone_nonce_value.as_bytes()); // 96-bits; unique per message
-            let ciphertext = cipher
+            let aes_gcm_key = GenericArray::from_slice(password_hash.as_bytes());
+            let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
+            let aes_gcm_nonce = Nonce::from_slice(&nonce); // 96-bits; unique per message
+            let aes_gcm_ciphertext = aes_gcm_cipher
                 .encrypt(
-                    aes_nonce,
-                    rc_clone_serialized_data_to_encrypt_value
-                        .to_string()
-                        .into_bytes()
-                        .as_ref(),
+                    aes_gcm_nonce,
+                    serialized_data_to_encrypt.to_string().into_bytes().as_ref(),
                 )
                 .unwrap_or_else(|e| {
                     eprint!("Error encrypting with AES GCM {}", e);
                     exit(255);
                 });
 
-            let password_hash_slice = password_hash.as_bytes();
-            let mut hmac = Hasher::new_keyed(password_hash_slice);
-            hmac.update(ciphertext.as_slice());
-            hmac.update(&account.clone().into_bytes());
-            let hmac_bytes = hasher.finalize().to_string().into_bytes();
-
             let deposit_request = MessageRequest::DepositRequest {
                 id: account,
-                nonce: rc_clone2_nonce_value.to_string(),
-                ciphertext: rc_clone2_serialized_data_to_encrypt_value.into_bytes(),
-                hmac: hmac_bytes,
+                nonce: aes_gcm_nonce.to_vec(),
+                ciphertext: aes_gcm_ciphertext.to_vec(),
             };
 
             let serialized_message = serde_json::to_string(&deposit_request).unwrap_or_else(|e| {
                 eprint!("Error serializing message {}", e);
                 exit(255);
             });
-            //println!("{}", serialized_message);
+
             let serialized_with_newline = format!("{}\n", serialized_message);
             stream
                 .write_all(serialized_with_newline.as_bytes())
