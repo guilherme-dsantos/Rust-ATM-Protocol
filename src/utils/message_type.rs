@@ -2,13 +2,13 @@ use core::fmt;
 use serde::{Deserialize, Serialize};
 use std::vec::Vec;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub enum MessageRequest {
     RegistrationRequest {
-        nonce: String,
-        ciphertext: Vec<u8>,
-        atm_public_key: Vec<u8>,
-        hmac: Vec<u8>,
+        msg_nonce: String,
+        msg_ciphertext: Vec<u8>,
+        msg_atm_public_key: Vec<u8>,
+        msg_hmac: Vec<u8>,
     },
     DepositRequest {
         id: String,
@@ -21,9 +21,9 @@ pub enum MessageRequest {
 #[derive(Serialize, Deserialize)]
 pub enum MessageResponse {
     RegistrationResponse {
-        success: bool,
-        ciphertext: Vec<u8>,
-        hmac: Vec<u8>,
+        msg_success: bool,
+        msg_ciphertext: Vec<u8>,
+        msg_hmac: Vec<u8>,
     },
     DepositResponse {
         ciphertext: Vec<u8>,
@@ -35,15 +35,15 @@ impl fmt::Display for MessageRequest {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             MessageRequest::RegistrationRequest {
-                ciphertext,
-                atm_public_key,
-                hmac,
-                nonce,
+                msg_ciphertext,
+                msg_atm_public_key,
+                msg_hmac,
+                msg_nonce,
             } => {
                 write!(
                     f,
                     "RegistrationRequest: ciphertext={:?}, atm_public_key={:?}, hmac={:?}, nonce={}",
-                    ciphertext, atm_public_key, hmac, nonce
+                    msg_ciphertext, msg_atm_public_key, msg_hmac, msg_nonce
                 )
             }
             MessageRequest::DepositRequest {
@@ -60,14 +60,14 @@ impl fmt::Display for MessageResponse {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             MessageResponse::RegistrationResponse {
-                success,
-                ciphertext,
-                hmac,
+                msg_success,
+                msg_ciphertext,
+                msg_hmac,
             } => {
                 write!(
                     f,
                     "RegistrationResponse: success={}, ciphertext={:?}, hmac={:?}",
-                    success, ciphertext, hmac
+                    msg_success, msg_ciphertext, msg_hmac
                 )
             }
             MessageResponse::DepositResponse {
