@@ -64,5 +64,16 @@ pub fn cli() -> Result<clap::ArgMatches, clap::Error> {
                 .conflicts_with_all(&["balance", "deposit", "withdraw"]),
         )
         .try_get_matches();
+    
+    // Check if the total length of all arguments exceeds 4096 characters
+    //Ex: Execution "cargo run --bin atm -- -a bob -n 140.00" has a length of 33 -> target\debug\atm.exe-abob-n140.00
+    let total_length: usize = std::env::args().map(|arg| arg.len()).sum();
+    if total_length > 4096 {
+        return Err(clap::Error::with_description(
+            "".to_owned(),
+            clap::ErrorKind::InvalidValue,
+        ));
+    }
+
     matches
 }

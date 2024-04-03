@@ -44,7 +44,7 @@ fn extract_public_key(file_path: &str) -> Result<RsaPublicKey, String> {
     }
 }
 
-fn validate_balance(s: &str) {
+/*fn validate_balance(s: &str) {
     let pattern = regex::Regex::new(r"^(0|[1-9][0-9]*)\.[0-9]{2}$").unwrap();
     match pattern.is_match(s) {
         true => {
@@ -54,6 +54,30 @@ fn validate_balance(s: &str) {
             });
             if value < 10.00 {
                 exit(301);
+            }
+        }
+        false => {
+            eprintln!("Not a match");
+            exit(303);
+        }
+    }
+}*/
+
+fn validate_number(s: &str, balance:bool) {
+    let pattern = regex::Regex::new(r"^(0|[1-9][0-9]*)\.[0-9]{2}$").unwrap();
+    match pattern.is_match(s) {
+        true => {
+            let value = f64::from_str(s).unwrap_or_else(|_| {
+                eprintln!("Failed to parse balance as a float.");
+                exit(252);
+            });
+            if value < 0.00 || value > 4294967295.99 {
+                exit(302);
+            }
+            if balance{
+                if value < 10.00 {
+                    exit(301);
+                }
             }
         }
         false => {
@@ -181,7 +205,7 @@ fn main() -> std::io::Result<()> {
 
     match operation {
         Operation::Balance(balance) => {
-            validate_balance(&balance);
+            validate_number(&balance, true);
 
             /* This part of the code is to send a request to the bank to register the account */
 
