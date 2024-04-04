@@ -16,7 +16,14 @@ pub struct AccountData {
 
 #[derive(Debug, Deserialize)]
 pub struct AccountData2 {
+    pub id: String,
     pub dh_uk: Vec<u8>,
     pub hash: Vec<u8>,
     pub deposit: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AccountData3 {
+    pub dh_uk: Vec<u8>,
+    pub hash: Vec<u8>,
 }

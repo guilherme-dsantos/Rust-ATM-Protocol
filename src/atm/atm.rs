@@ -30,7 +30,7 @@ use textnonce::TextNonce;
 use utils::{
     atm_parser,
     message_type::{MessageRequest, MessageResponse},
-    operations::{AccountData, Operation},
+    operations::{AccountData, AccountData3, Operation},
 };
 use x25519_dalek::{EphemeralSecret, PublicKey};
 
@@ -44,25 +44,6 @@ fn extract_public_key(file_path: &str) -> Result<RsaPublicKey, String> {
         Err(err) => Err(format!("Error reading public key from file: {}", err)),
     }
 }
-
-/*fn validate_balance(s: &str) {
-    let pattern = regex::Regex::new(r"^(0|[1-9][0-9]*)\.[0-9]{2}$").unwrap();
-    match pattern.is_match(s) {
-        true => {
-            let value = f64::from_str(s).unwrap_or_else(|_| {
-                eprintln!("Failed to parse balance as a float.");
-                exit(252);
-            });
-            if value < 10.00 {
-                exit(301);
-            }
-        }
-        false => {
-            eprintln!("Not a match");
-            exit(303);
-        }
-    }
-}*/
 
 fn validate_number(s: &str, balance: bool) {
     let pattern = regex::Regex::new(r"^(0|[1-9][0-9]*)\.[0-9]{2}$").unwrap();
@@ -269,18 +250,18 @@ fn main() -> std::io::Result<()> {
             let mut hmac = Hasher::new_keyed(password_hash_slice);
             hmac.update(enc_data.as_slice());
             hmac.update(atm_public_key_bytes.as_slice());
-            let hmac_bytes = hmac.finalize().to_string().into_bytes();
+            let hmac_bytes = hmac.finalize().as_bytes().to_owned();
 
             let rc_hmac = Rc::new(hmac_bytes);
             let rc_clone_hmac = Rc::clone(&rc_hmac);
-            let rc_hmac_value = Rc::try_unwrap(rc_hmac).unwrap_or_else(|data| (*data).clone());
+            let rc_hmac_value = Rc::try_unwrap(rc_hmac).unwrap_or_else(|data| (*data));
 
             //Create request to the bank
             let registration_request = MessageRequest::RegistrationRequest {
                 msg_nonce: nonce.to_string(),
                 msg_ciphertext: enc_data,
                 msg_atm_public_key: atm_public_key_bytes,
-                msg_hmac: rc_hmac_value,
+                msg_hmac: rc_hmac_value.to_vec(),
             };
 
             //Serialize request to send via TCP
@@ -338,7 +319,7 @@ fn main() -> std::io::Result<()> {
 
                     //Check HMACs for Integrity
                     let rc_hmac_value =
-                        Rc::try_unwrap(rc_clone_hmac).unwrap_or_else(|data| (*data).clone());
+                        Rc::try_unwrap(rc_clone_hmac).unwrap_or_else(|data| (*data));
                     if msg_hmac != rc_hmac_value {
                         eprintln!("Integrity attack detected");
                         exit(255);
@@ -365,8 +346,8 @@ fn main() -> std::io::Result<()> {
         Operation::Deposit(deposit) => {
             //Generate ATM DH Public Key
             let csprng = rand::thread_rng();
-            let client_secret = EphemeralSecret::random_from_rng(csprng);
-            let client_dh_public = PublicKey::from(&client_secret);
+            let atm_secret = EphemeralSecret::random_from_rng(csprng);
+            let atm_public = PublicKey::from(&atm_secret);
 
             //Read PIN and Salt from card
             let path = Path::new(&card_file);
@@ -381,10 +362,10 @@ fn main() -> std::io::Result<()> {
             let pin_bytes = pin64.to_be_bytes();
             let mut hasher = blake3::Hasher::new();
             hasher.update(&pin_bytes);
-            hasher.update(salt.to_string().into_bytes().as_slice());
+            hasher.update(salt.as_bytes());
             let password_hash = hasher.finalize();
-            let password_hash_bytes = password_hash.to_string().into_bytes();
-            let client_dh_public_to_bytes = client_dh_public.to_bytes().to_vec();
+            let password_hash_bytes = password_hash.as_bytes();
+            let client_dh_public_to_bytes = atm_public.as_bytes();
 
             //Serialized data to encrypt later
             let serialized_data = serde_json::json!({
@@ -393,6 +374,7 @@ fn main() -> std::io::Result<()> {
                 "hash": password_hash_bytes,
                 "deposit" : deposit,
             });
+
             let serialized_data_to_encrypt =
                 serde_json::to_string(&serialized_data).expect("Failed to serialize data to JSON");
 
@@ -401,13 +383,17 @@ fn main() -> std::io::Result<()> {
             rand::thread_rng().fill_bytes(&mut nonce);
 
             // Use the hash as a key for AES256-GCM-SIV
-            let aes_gcm_key = GenericArray::from_slice(password_hash.as_bytes());
+
+            let aes_gcm_key = GenericArray::from_slice(password_hash_bytes.as_slice());
+
             let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
+
             let aes_gcm_nonce = Nonce::from_slice(&nonce); // 96-bits; unique per message
+
             let aes_gcm_ciphertext = aes_gcm_cipher
                 .encrypt(
                     aes_gcm_nonce,
-                    serialized_data_to_encrypt.to_string().into_bytes().as_ref(),
+                    serialized_data_to_encrypt.into_bytes().as_ref(),
                 )
                 .unwrap_or_else(|e| {
                     eprint!("Error encrypting with AES GCM {}", e);
@@ -415,9 +401,9 @@ fn main() -> std::io::Result<()> {
                 });
 
             let deposit_request = MessageRequest::DepositRequest {
-                id: account,
-                nonce: aes_gcm_nonce.to_vec(),
-                ciphertext: aes_gcm_ciphertext.to_vec(),
+                msg_id: account,
+                msg_nonce: aes_gcm_nonce.to_vec(),
+                msg_ciphertext: aes_gcm_ciphertext.to_vec(),
             };
 
             let serialized_message = serde_json::to_string(&deposit_request).unwrap_or_else(|e| {
@@ -432,6 +418,61 @@ fn main() -> std::io::Result<()> {
                     eprint!("Error sending message {}", e);
                     exit(255);
                 });
+
+            /* This part of the code is to receive the response from the bank */
+
+            let mut buffer = Vec::new();
+            let mut reader = BufReader::new(&stream);
+
+            let bytes_read = reader.read_until(b'\n', &mut buffer).unwrap();
+
+            if bytes_read == 0 {
+                exit(0);
+            }
+
+            let message = serde_json::from_slice::<MessageResponse>(&buffer).unwrap();
+
+            if let MessageResponse::DepositResponse {
+                msg_success,
+                msg_ciphertext,
+                msg_nonce,
+            } = message
+            {
+                if msg_success {
+                    let response_aes_gcm_nonce = Nonce::from_slice(&msg_nonce); // 96-bits; unique per message
+                                                                                //Decrypt the ciphertext with my hashed password
+                    let plaintext = aes_gcm_cipher
+                        .decrypt(response_aes_gcm_nonce, msg_ciphertext.as_ref())
+                        .unwrap_or_else(|e| {
+                            eprint!("Error decrypting {}", e);
+                            exit(255);
+                        });
+
+                    //Deserialize decrypted data into struct AccoundData(id,hash,balance)
+                    let account_data: AccountData3 = serde_json::from_slice(&plaintext).unwrap();
+
+                    if account_data.hash != password_hash_bytes {
+                        eprintln!("Something is wron the hashes aren't identical");
+                        exit(255);
+                    }
+
+                    //Clean buffer
+                    buffer.clear();
+
+                    // Convert the Vec<u8> to a [u8; 32]
+                    let received_bytes: [u8; 32] = match account_data.dh_uk.try_into() {
+                        Ok(bytes) => bytes,
+                        Err(e) => panic!("Received Vec<u8> was not of length 32: {:?}", e),
+                    };
+
+                    let public_key = PublicKey::from(received_bytes);
+                    let dh_shared_secret = atm_secret.diffie_hellman(&public_key);
+
+                    println!("{:?}", dh_shared_secret.to_bytes());
+                }
+            } else {
+                println!("Received wrong message!");
+            }
         }
         Operation::Withdraw(withdraw) => {
             // Handle withdraw operation

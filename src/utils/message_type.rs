@@ -11,9 +11,9 @@ pub enum MessageRequest {
         msg_hmac: Vec<u8>,
     },
     DepositRequest {
-        id: String,
-        nonce: Vec<u8>,
-        ciphertext: Vec<u8>,
+        msg_id: String,
+        msg_nonce: Vec<u8>,
+        msg_ciphertext: Vec<u8>,
     },
 }
 
@@ -25,8 +25,9 @@ pub enum MessageResponse {
         msg_hmac: Vec<u8>,
     },
     DepositResponse {
-        ciphertext: Vec<u8>,
-        hmac: Vec<u8>,
+        msg_success: bool,
+        msg_nonce: Vec<u8>,
+        msg_ciphertext: Vec<u8>,
     },
 }
 
@@ -46,9 +47,9 @@ impl fmt::Display for MessageRequest {
                 )
             }
             MessageRequest::DepositRequest {
-                id: _,
-                nonce: _,
-                ciphertext: _,
+                msg_id: _,
+                msg_nonce: _,
+                msg_ciphertext: _,
             } => todo!(),
         }
     }
@@ -69,8 +70,9 @@ impl fmt::Display for MessageResponse {
                 )
             }
             MessageResponse::DepositResponse {
-                ciphertext: _,
-                hmac: _,
+                msg_nonce: _,
+                msg_ciphertext: _,
+                msg_success: _,
             } => todo!(),
         }
     }
