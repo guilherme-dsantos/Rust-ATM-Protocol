@@ -15,6 +15,16 @@ pub enum MessageRequest {
         msg_nonce: Vec<u8>,
         msg_ciphertext: Vec<u8>,
     },
+    WithdrawRequest {
+        msg_id: String,
+        msg_nonce: Vec<u8>,
+        msg_ciphertext: Vec<u8>,
+    },
+    GetBalanceRequest {
+        msg_id: String,
+        msg_nonce: Vec<u8>,
+        msg_ciphertext: Vec<u8>,
+    },
 }
 
 #[derive(Serialize, Deserialize)]
@@ -25,6 +35,16 @@ pub enum MessageResponse {
         msg_hmac: Vec<u8>,
     },
     DepositResponse {
+        msg_success: bool,
+        msg_nonce: Vec<u8>,
+        msg_ciphertext: Vec<u8>,
+    },
+    WithdrawResponse {
+        msg_success: bool,
+        msg_nonce: Vec<u8>,
+        msg_ciphertext: Vec<u8>,
+    },
+    GetBalanceResponse {
         msg_success: bool,
         msg_nonce: Vec<u8>,
         msg_ciphertext: Vec<u8>,
@@ -51,6 +71,16 @@ impl fmt::Display for MessageRequest {
                 msg_nonce: _,
                 msg_ciphertext: _,
             } => todo!(),
+            MessageRequest::WithdrawRequest {
+                msg_id: _,
+                msg_nonce: _,
+                msg_ciphertext: _,
+            } => todo!(),
+            MessageRequest::GetBalanceRequest {
+                msg_id: _,
+                msg_nonce: _,
+                msg_ciphertext: _,
+            } => todo!(),
         }
     }
 }
@@ -70,6 +100,16 @@ impl fmt::Display for MessageResponse {
                 )
             }
             MessageResponse::DepositResponse {
+                msg_nonce: _,
+                msg_ciphertext: _,
+                msg_success: _,
+            } => todo!(),
+            MessageResponse::WithdrawResponse {
+                msg_nonce: _,
+                msg_ciphertext: _,
+                msg_success: _,
+            } => todo!(),
+            MessageResponse::GetBalanceResponse {
                 msg_nonce: _,
                 msg_ciphertext: _,
                 msg_success: _,

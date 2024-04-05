@@ -4,13 +4,13 @@ pub enum Operation {
     Balance(String),
     Deposit(String),
     Withdraw(String),
-    Get(String),
+    Get,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct AccountData {
     pub id: String,
-    pub hash: Vec<u8>,
+    pub hash: [u8; 32],
     pub balance: String,
 }
 
@@ -32,4 +32,15 @@ pub struct AccountData4 {
     pub id: String,
     pub hash: Vec<u8>,
     pub deposit: String,
+}
+#[derive(Debug, Deserialize)]
+pub struct AccountData5 {
+    pub id: String,
+    pub hash: Vec<u8>,
+    pub balance: String,
+}
+#[derive(Debug, Deserialize)]
+pub struct AccountData6 {
+    pub id: String,
+    pub hash: Vec<u8>,
 }
