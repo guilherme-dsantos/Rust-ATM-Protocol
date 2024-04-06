@@ -28,7 +28,7 @@ use x25519_dalek::PublicKey;
 use utils::{
     bank_parser,
     message_type::{MessageRequest, MessageResponse},
-    operations::{AccountData, AccountData2, AccountData4, AccountData6},
+    operations::{AccountDataIdDHHash, AccountIDHash, AccountIdHashAmount},
 };
 
 fn serialize_and_write<T: serde::Serialize>(stream: &mut TcpStream, message: &T) {
@@ -52,7 +52,7 @@ fn handle_client(
     bank_private_key: Arc<RsaPrivateKey>,
     users_table: Arc<Mutex<HashMap<String, Vec<u8>>>>,
     balance_table: Arc<Mutex<HashMap<String, f64>>>,
-    nonces: Arc<Mutex<Vec<String>>>,
+    nonces: Arc<Mutex<Vec<Vec<u8>>>>,
 ) {
     let mut buffer = Vec::new();
     let mut reader = BufReader::new(&stream);
@@ -60,6 +60,7 @@ fn handle_client(
     let _ = reader.read_until(b'\n', &mut buffer).unwrap();
 
     match serde_json::from_slice::<MessageRequest>(&buffer) {
+        //Receive first registry message
         Ok(message) => match message {
             MessageRequest::RegistrationRequest {
                 msg_ciphertext,
@@ -73,10 +74,11 @@ fn handle_client(
                     .expect("Error decrypting message");
 
                 //Deserialize decrypted data
-                let account_data: AccountData = serde_json::from_slice(&decrypted_data).unwrap();
+                let account_data: AccountIdHashAmount =
+                    serde_json::from_slice(&decrypted_data).unwrap();
                 let account_id: String = account_data.id;
                 let hashed_password = account_data.hash;
-                let balance = account_data.balance;
+                let balance = account_data.amount;
                 let balancef64: f64 = balance.parse().unwrap_or_else(|e| {
                     eprintln!("Error parsing string to f64 {}", e);
                     exit(255);
@@ -119,7 +121,7 @@ fn handle_client(
 
                 //Check for Repeated Nonces for Replay Attacks
                 let mut locked_nonces = nonces.lock().unwrap();
-                if locked_nonces.contains(&msg_nonce) {
+                if locked_nonces.contains(&msg_nonce.to_vec()) {
                     eprintln!("Replay attack detected");
                     stream
                         .write_all(serialized_bad_with_newline.as_bytes())
@@ -190,6 +192,7 @@ fn handle_client(
 
                 println!("{}", json_result);
             }
+            //Receive first deposit message
             MessageRequest::DepositRequest {
                 msg_id,
                 msg_nonce,
@@ -238,7 +241,7 @@ fn handle_client(
                 buffer.clear();
 
                 //Deserialize decrypted data
-                let account_data: AccountData2 = serde_json::from_slice(&plaintext).unwrap();
+                let account_data: AccountDataIdDHHash = serde_json::from_slice(&plaintext).unwrap();
                 let id = account_data.id;
                 let dh_uk = account_data.dh_uk;
                 let hashed_password = account_data.hash;
@@ -253,16 +256,8 @@ fn handle_client(
                     exit(255);
                 }
 
-                // Convert the Vec<u8> to a [u8; 32]
-                let received_bytes: [u8; 32] = match dh_uk.try_into() {
-                    Ok(bytes) => bytes,
-                    Err(e) => panic!("Received Vec<u8> was not of length 32: {:?}", e),
-                };
-
-                let public_key = PublicKey::from(received_bytes);
+                let public_key = PublicKey::from(dh_uk);
                 let dh_shared_secret = bank_secret.diffie_hellman(&public_key);
-
-                /* Send response to ATM */
 
                 // Generate a 12-byte nonce
                 let mut response_nonce = [0u8; 12];
@@ -279,11 +274,8 @@ fn handle_client(
 
                 // Use the hash as a key for AES256-GCM-SIV
                 let aes_gcm_key = GenericArray::from_slice(hashed_password.as_slice());
-
                 let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
-
                 let aes_gcm_nonce = Nonce::from_slice(&response_nonce); // 96-bits; unique per message
-
                 let aes_gcm_ciphertext = aes_gcm_cipher
                     .encrypt(
                         aes_gcm_nonce,
@@ -300,12 +292,12 @@ fn handle_client(
                     msg_success: true,
                 };
 
+                //Send second deposit message
                 serialize_and_write(&mut stream, &deposit_response);
 
+                //Receive third message
                 let mut reader = BufReader::new(&stream);
-
                 let _ = reader.read_until(b'\n', &mut buffer).unwrap();
-
                 let message = serde_json::from_slice::<MessageRequest>(&buffer).unwrap();
 
                 if let MessageRequest::DepositRequest {
@@ -326,9 +318,10 @@ fn handle_client(
                         });
 
                     //Deserialize decrypted data into struct AccoundData(id,hash,balance)
-                    let account_data: AccountData4 = serde_json::from_slice(&plaintext).unwrap();
+                    let account_data: AccountIdHashAmount =
+                        serde_json::from_slice(&plaintext).unwrap();
 
-                    if account_data.hash != hashed_password {
+                    if account_data.hash != *hashed_password {
                         eprintln!("Something is wron the hashes aren't identical");
                         exit(255);
                     }
@@ -348,7 +341,7 @@ fn handle_client(
                             exit(255);
                         })
                         .to_owned();
-                    let calculate_balance: f64 = account_data.deposit.parse().unwrap();
+                    let calculate_balance: f64 = account_data.amount.parse().unwrap();
                     let new_balance = user_balance + calculate_balance;
 
                     match locked_balance_table.get_mut(&account_data.id) {
@@ -362,7 +355,7 @@ fn handle_client(
                     let serialized_data = serde_json::json!({
                         "id": "Bank",
                         "hash": hashed_password,
-                        "deposit" : account_data.deposit,
+                        "amount" : account_data.amount,
                     });
 
                     let serialized_data_to_encrypt = serde_json::to_string(&serialized_data)
@@ -374,11 +367,8 @@ fn handle_client(
 
                     // Now we use the DH secret as a key for AES256-GCM-SIV
                     let aes_gcm_key = GenericArray::from_slice(dh_shared_secret.as_bytes());
-
                     let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
-
                     let aes_gcm_nonce = Nonce::from_slice(&nonce); // 96-bits; unique per message
-
                     let aes_gcm_ciphertext = aes_gcm_cipher
                         .encrypt(
                             aes_gcm_nonce,
@@ -395,11 +385,12 @@ fn handle_client(
                         msg_success: true,
                     };
 
+                    //Send fourth message
                     serialize_and_write(&mut stream, &deposit_response);
 
                     let json_result_final = json!({
                         "account": account_data.id,
-                        "deposit": account_data.deposit,
+                        "deposit": account_data.amount,
                     });
 
                     println!("{}", json_result_final);
@@ -453,7 +444,7 @@ fn handle_client(
                 buffer.clear();
 
                 //Deserialize decrypted data
-                let account_data: AccountData2 = serde_json::from_slice(&plaintext).unwrap();
+                let account_data: AccountDataIdDHHash = serde_json::from_slice(&plaintext).unwrap();
                 let id = account_data.id;
                 let dh_uk = account_data.dh_uk;
                 let hashed_password = account_data.hash;
@@ -468,17 +459,8 @@ fn handle_client(
                     exit(255);
                 }
 
-                // Convert the Vec<u8> to a [u8; 32]
-                let received_bytes: [u8; 32] = match dh_uk.try_into() {
-                    Ok(bytes) => bytes,
-                    Err(e) => panic!("Received Vec<u8> was not of length 32: {:?}", e),
-                };
-
-                let public_key = PublicKey::from(received_bytes);
+                let public_key = PublicKey::from(dh_uk);
                 let dh_shared_secret = bank_secret.diffie_hellman(&public_key);
-
-                println!("{:?}", dh_shared_secret.to_bytes());
-                /* Send response to ATM */
 
                 // Generate a 12-byte nonce
                 let mut response_nonce = [0u8; 12];
@@ -541,9 +523,10 @@ fn handle_client(
                         });
 
                     //Deserialize decrypted data into struct AccoundData(id,hash,balance)
-                    let account_data: AccountData4 = serde_json::from_slice(&plaintext).unwrap();
+                    let account_data: AccountIdHashAmount =
+                        serde_json::from_slice(&plaintext).unwrap();
 
-                    if account_data.hash != hashed_password {
+                    if account_data.hash != *hashed_password {
                         eprintln!("Something is wron the hashes aren't identical");
                         exit(255);
                     }
@@ -563,7 +546,7 @@ fn handle_client(
                             exit(255);
                         })
                         .to_owned();
-                    let calculate_balance: f64 = account_data.deposit.parse().unwrap();
+                    let calculate_balance: f64 = account_data.amount.parse().unwrap();
                     let new_balance = user_balance - calculate_balance;
                     let success;
                     if new_balance < 0.00 {
@@ -582,7 +565,7 @@ fn handle_client(
                     let serialized_data = serde_json::json!({
                         "id": "Bank",
                         "hash": hashed_password,
-                        "deposit" : account_data.deposit,
+                        "amount" : account_data.amount,
                     });
 
                     let serialized_data_to_encrypt = serde_json::to_string(&serialized_data)
@@ -620,7 +603,7 @@ fn handle_client(
                     if success {
                         let json_result_final = json!({
                             "account": account_data.id,
-                            "withdraw": account_data.deposit,
+                            "withdraw": account_data.amount,
                         });
 
                         println!("{}", json_result_final);
@@ -676,7 +659,7 @@ fn handle_client(
                 buffer.clear();
 
                 //Deserialize decrypted data
-                let account_data: AccountData2 = serde_json::from_slice(&plaintext).unwrap();
+                let account_data: AccountDataIdDHHash = serde_json::from_slice(&plaintext).unwrap();
                 let id = account_data.id;
                 let dh_uk = account_data.dh_uk;
                 let hashed_password = account_data.hash;
@@ -691,17 +674,8 @@ fn handle_client(
                     exit(255);
                 }
 
-                // Convert the Vec<u8> to a [u8; 32]
-                let received_bytes: [u8; 32] = match dh_uk.try_into() {
-                    Ok(bytes) => bytes,
-                    Err(e) => panic!("Received Vec<u8> was not of length 32: {:?}", e),
-                };
-
-                let public_key = PublicKey::from(received_bytes);
+                let public_key = PublicKey::from(dh_uk);
                 let dh_shared_secret = bank_secret.diffie_hellman(&public_key);
-
-                println!("{:?}", dh_shared_secret.to_bytes());
-                /* Send response to ATM */
 
                 // Generate a 12-byte nonce
                 let mut response_nonce = [0u8; 12];
@@ -742,7 +716,6 @@ fn handle_client(
                 serialize_and_write(&mut stream, &getbalance_response);
 
                 let mut reader = BufReader::new(&stream);
-
                 let _ = reader.read_until(b'\n', &mut buffer).unwrap();
                 let message = serde_json::from_slice::<MessageRequest>(&buffer).unwrap();
 
@@ -764,7 +737,7 @@ fn handle_client(
                         });
 
                     //Deserialize decrypted data into struct AccoundData(id,hash,balance)
-                    let account_data: AccountData6 = serde_json::from_slice(&plaintext).unwrap();
+                    let account_data: AccountIDHash = serde_json::from_slice(&plaintext).unwrap();
 
                     if account_data.hash != hashed_password {
                         eprintln!("Something is wron the hashes aren't identical");
@@ -795,7 +768,7 @@ fn handle_client(
                     let serialized_data = serde_json::json!({
                         "id": "Bank",
                         "hash": hashed_password,
-                        "balance" : balance,
+                        "amount" : balance,
                     });
 
                     let serialized_data_to_encrypt = serde_json::to_string(&serialized_data)
@@ -848,7 +821,7 @@ fn handle_client(
 fn main() -> std::io::Result<()> {
     let users_table: Arc<Mutex<HashMap<String, Vec<u8>>>> = Arc::new(Mutex::new(HashMap::new()));
     let balance_table: Arc<Mutex<HashMap<String, f64>>> = Arc::new(Mutex::new(HashMap::new()));
-    let nonces = Arc::new(Mutex::new(Vec::<String>::new()));
+    let nonces = Arc::new(Mutex::new(Vec::<Vec<u8>>::new()));
 
     let (port, auth_file): (String, String) = match bank_parser::cli() {
         Ok(matches) => {
@@ -867,7 +840,7 @@ fn main() -> std::io::Result<()> {
     };
 
     // Generate RSA keypair
-    let bits = 4096;
+    let bits = 2048;
     let bank_private_key = RsaPrivateKey::new(&mut rand::thread_rng(), bits).unwrap_or_else(|_| {
         eprintln!("Error generating RSA pair");
         exit(255);

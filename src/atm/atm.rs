@@ -15,7 +15,7 @@ use rsa::{
     Pkcs1v15Encrypt, RsaPrivateKey, RsaPublicKey,
 };
 use serde_json::json;
-use std::io::{self, BufReader};
+use std::io::BufRead;
 use std::process::exit;
 use std::{
     fs::{self, File, OpenOptions},
@@ -23,14 +23,20 @@ use std::{
     net::TcpStream,
     path::Path,
 };
-use std::{io::BufRead, str::FromStr};
+use std::{
+    io::{self, BufReader},
+    time::Duration,
+};
 use std::{rc::Rc, vec::Vec};
 use textnonce::TextNonce;
 
 use utils::{
     atm_parser,
     message_type::{MessageRequest, MessageResponse},
-    operations::{AccountData, AccountData3, AccountData4, AccountData5, Operation},
+    operations::{AccountDHHash, AccountIdHashAmount, Operation},
+    validate_functions::{
+        validate_account, validate_file_name, validate_ip_address, validate_number, validate_port,
+    },
 };
 use x25519_dalek::{EphemeralSecret, PublicKey};
 
@@ -42,69 +48,6 @@ fn extract_public_key(file_path: &str) -> Result<RsaPublicKey, String> {
             Ok(public_key)
         }
         Err(err) => Err(format!("Error reading public key from file: {}", err)),
-    }
-}
-
-fn validate_number(s: &str, balance: bool) {
-    let pattern = regex::Regex::new(r"^(0|[1-9][0-9]*)\.[0-9]{2}$").unwrap();
-    match pattern.is_match(s) {
-        true => {
-            let value = f64::from_str(s).unwrap_or_else(|_| {
-                eprintln!("Failed to parse balance as a float.");
-                exit(252);
-            });
-            if !(0.00..=4294967295.99).contains(&value) {
-                exit(225);
-            }
-            if balance && value < 10.00 {
-                exit(225);
-            }
-        }
-        false => {
-            eprintln!("Not a match");
-            exit(225);
-        }
-    }
-}
-
-fn validate_ip_address(s: &str) {
-    let pattern = regex::Regex::new(r"^((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])$").unwrap();
-    if !pattern.is_match(s) {
-        eprintln!("{}", &s);
-        exit(252)
-    }
-}
-
-fn validate_port(s: &str) {
-    if let Ok(port) = s.parse::<u16>() {
-        //u16 goes to 65535
-        if port < 1024 {
-            eprintln!("Port number out of valid range (1024-65535).");
-            exit(259);
-        }
-    } else {
-        eprintln!("Invalid input: not a number or too big.");
-        exit(251);
-    }
-}
-fn validate_account(account_name: &str) {
-    let valid_pattern = regex::Regex::new(r"^[_\-\.0-9a-z]+$").unwrap();
-    let is_valid_length = !account_name.is_empty() && account_name.len() <= 122;
-    let is_valid_name = valid_pattern.is_match(account_name);
-
-    if !(is_valid_length && is_valid_name) {
-        eprintln!("Invalid account name: {}", account_name);
-        exit(255);
-    }
-}
-
-fn validate_file_name(file_name: &str) {
-    let valid_pattern = regex::Regex::new(r"^[_\-\.0-9a-z]+$").unwrap();
-    let is_valid_length = !file_name.is_empty() && file_name.len() <= 127;
-    let is_valid_name = valid_pattern.is_match(file_name);
-    let is_not_special = file_name != "." && file_name != "..";
-    if !(is_valid_length && is_valid_name && is_not_special) {
-        exit(277);
     }
 }
 
@@ -157,35 +100,56 @@ fn main() -> std::io::Result<()> {
                 .unwrap_or("bank.auth")
                 .to_string(); //alterar para working directory
                               //validate_file_name(&auth_file);
+            if !validate_file_name(&auth_file) {
+                exit(255);
+            }
             let ip_address = matches
                 .value_of("ip-address")
                 .unwrap_or("127.0.0.1")
                 .to_string();
-            validate_ip_address(&ip_address);
-
+            if !validate_ip_address(&ip_address) {
+                exit(255);
+            }
             let port = matches.value_of("port").unwrap_or("3000").to_string();
-            validate_port(&port);
-
+            if !validate_port(&port) {
+                exit(255);
+            }
             let account = matches
                 .value_of("account")
                 .unwrap_or_else(|| {
                     exit(251);
                 })
                 .to_string();
-            validate_account(&account);
+            if !validate_account(&account) {
+                exit(255);
+            }
 
             let card_file = matches
                 .value_of("card-file")
                 .map(|s| s.to_string())
                 .unwrap_or(format!("{}{}", account, ".card"));
-            validate_file_name(&card_file);
+            if !validate_file_name(&card_file) {
+                exit(255);
+            }
 
             let operation = if matches.is_present("balance") {
-                Operation::Balance(matches.value_of("balance").unwrap().to_string())
+                let value = matches.value_of("balance").unwrap().to_string();
+                if !validate_number(&value, true) {
+                    exit(255);
+                }
+                Operation::Balance(value)
             } else if matches.is_present("deposit") {
-                Operation::Deposit(matches.value_of("deposit").unwrap().to_string())
+                let value = matches.value_of("deposit").unwrap().to_string();
+                if !validate_number(&value, false) {
+                    exit(255);
+                }
+                Operation::Deposit(value)
             } else if matches.is_present("withdraw") {
-                Operation::Withdraw(matches.value_of("withdraw").unwrap().to_string())
+                               let value = matches.value_of("withdraw").unwrap().to_string();
+                if !validate_number(&value, false){
+                    exit(255);
+                }
+                Operation::Withdraw(value)
             } else if matches.is_present("get") {
                 Operation::Get
             } else {
@@ -205,6 +169,12 @@ fn main() -> std::io::Result<()> {
         exit(254);
     });
 
+    stream
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .unwrap_or_else(|_| {
+            exit(63);
+        });
+
     match operation {
         Operation::Balance(balance) => {
             validate_number(&balance, true);
@@ -212,7 +182,7 @@ fn main() -> std::io::Result<()> {
             /* This part of the code is to send a request to the bank to register the account */
 
             // Generate RSA keypair
-            let bits = 4096;
+            let bits = 2048;
             let atm_private_key =
                 RsaPrivateKey::new(&mut rand::thread_rng(), bits).unwrap_or_else(|_| {
                     eprintln!("Error generating RSA pair");
@@ -249,7 +219,7 @@ fn main() -> std::io::Result<()> {
             let serialized_data = serde_json::json!({
                 "id": account,
                 "hash": password_hash_slice,
-                "balance" : balance,
+                "amount" : balance,
             });
             let data_to_be_encrypted =
                 serde_json::to_string(&serialized_data).expect("Failed to serialize data to JSON");
@@ -276,13 +246,13 @@ fn main() -> std::io::Result<()> {
 
             //Create request to the bank
             let registration_request = MessageRequest::RegistrationRequest {
-                msg_nonce: nonce.to_string(),
+                msg_nonce: nonce.as_bytes().to_vec(),
                 msg_ciphertext: enc_data,
                 msg_atm_public_key: atm_public_key_bytes,
                 msg_hmac: rc_hmac_value.to_vec(),
             };
 
-            //Serialize request to send via TCP
+            //Senf first registration message
             serialize_and_send(&mut stream, &registration_request);
 
             /* This part of the code is to receive the response from the bank */
@@ -311,7 +281,7 @@ fn main() -> std::io::Result<()> {
                         .expect("Error decrypting message");
 
                     //Deserialize decrypted data into struct AccoundData(id,hash,balance)
-                    let account_data: AccountData =
+                    let account_data: AccountIdHashAmount =
                         serde_json::from_slice(&decrypted_data).unwrap();
 
                     if account_data.hash != password_hash_slice {
@@ -402,6 +372,7 @@ fn main() -> std::io::Result<()> {
                 msg_ciphertext: aes_gcm_ciphertext.to_vec(),
             };
 
+            //Send first deposit message
             serialize_and_send(&mut stream, &deposit_request);
 
             /* This part of the code is to receive the response from the bank */
@@ -409,6 +380,7 @@ fn main() -> std::io::Result<()> {
             let mut buffer = Vec::new();
             let mut reader = BufReader::new(&stream);
 
+            //Receive second deposit message
             let _ = reader.read_until(b'\n', &mut buffer).unwrap();
 
             let message = serde_json::from_slice::<MessageResponse>(&buffer).unwrap();
@@ -430,7 +402,7 @@ fn main() -> std::io::Result<()> {
                         });
 
                     //Deserialize decrypted data into struct AccoundData(id,hash,balance)
-                    let account_data: AccountData3 = serde_json::from_slice(&plaintext).unwrap();
+                    let account_data: AccountDHHash = serde_json::from_slice(&plaintext).unwrap();
 
                     if account_data.hash != password_hash_bytes {
                         eprintln!("Something is wron the hashes aren't identical");
@@ -440,20 +412,14 @@ fn main() -> std::io::Result<()> {
                     //Clean buffer
                     buffer.clear();
 
-                    // Convert the Vec<u8> to a [u8; 32]
-                    let received_bytes: [u8; 32] = match account_data.dh_uk.try_into() {
-                        Ok(bytes) => bytes,
-                        Err(e) => panic!("Received Vec<u8> was not of length 32: {:?}", e),
-                    };
-
-                    let public_key = PublicKey::from(received_bytes);
+                    let public_key = PublicKey::from(account_data.dh_uk);
                     let dh_shared_secret = atm_secret.diffie_hellman(&public_key);
 
                     //Serialized data to encrypt later
                     let serialized_data = serde_json::json!({
                         "id": account,
                         "hash": password_hash_bytes,
-                        "deposit" : deposit,
+                        "amount" : deposit,
                     });
 
                     let serialized_data_to_encrypt = serde_json::to_string(&serialized_data)
@@ -483,8 +449,10 @@ fn main() -> std::io::Result<()> {
                         msg_ciphertext: aes_gcm_ciphertext.to_vec(),
                     };
 
+                    //Send third deposit message
                     serialize_and_send(&mut stream, &deposit_request);
 
+                    //Receive fourth deposit message
                     let mut reader = BufReader::new(&stream);
                     let _ = reader.read_until(b'\n', &mut buffer).unwrap();
                     let message = serde_json::from_slice::<MessageResponse>(&buffer).unwrap();
@@ -507,7 +475,7 @@ fn main() -> std::io::Result<()> {
                                 });
 
                             //Deserialize decrypted data into struct AccoundData(id,hash,balance)
-                            let account_data: AccountData4 =
+                            let account_data: AccountIdHashAmount =
                                 serde_json::from_slice(&plaintext).unwrap();
 
                             if account_data.hash != password_hash_bytes {
@@ -528,6 +496,7 @@ fn main() -> std::io::Result<()> {
                 println!("Received wrong message!");
             }
         }
+
         Operation::Withdraw(withdraw) => {
             //Generate ATM DH Public Key
             let csprng = rand::thread_rng();
@@ -569,11 +538,8 @@ fn main() -> std::io::Result<()> {
             // Use the hash as a key for AES256-GCM-SIV
 
             let aes_gcm_key = GenericArray::from_slice(password_hash_bytes.as_slice());
-
             let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
-
             let aes_gcm_nonce = Nonce::from_slice(&nonce); // 96-bits; unique per message
-
             let aes_gcm_ciphertext = aes_gcm_cipher
                 .encrypt(
                     aes_gcm_nonce,
@@ -584,24 +550,13 @@ fn main() -> std::io::Result<()> {
                     exit(255);
                 });
 
-            let deposit_request = MessageRequest::WithdrawRequest {
+            let withdraw_request = MessageRequest::WithdrawRequest {
                 msg_id: account.clone(),
                 msg_nonce: aes_gcm_nonce.to_vec(),
                 msg_ciphertext: aes_gcm_ciphertext.to_vec(),
             };
 
-            let serialized_message = serde_json::to_string(&deposit_request).unwrap_or_else(|e| {
-                eprint!("Error serializing message {}", e);
-                exit(255);
-            });
-
-            let serialized_with_newline = format!("{}\n", serialized_message);
-            stream
-                .write_all(serialized_with_newline.as_bytes())
-                .unwrap_or_else(|e| {
-                    eprint!("Error sending message {}", e);
-                    exit(255);
-                });
+            serialize_and_send(&mut stream, &withdraw_request);
 
             /* This part of the code is to receive the response from the bank */
 
@@ -629,7 +584,7 @@ fn main() -> std::io::Result<()> {
                         });
 
                     //Deserialize decrypted data into struct AccoundData(id,hash,balance)
-                    let account_data: AccountData3 = serde_json::from_slice(&plaintext).unwrap();
+                    let account_data: AccountDHHash = serde_json::from_slice(&plaintext).unwrap();
 
                     if account_data.hash != password_hash_bytes {
                         eprintln!("Something is wron the hashes aren't identical");
@@ -639,22 +594,14 @@ fn main() -> std::io::Result<()> {
                     //Clean buffer
                     buffer.clear();
 
-                    // Convert the Vec<u8> to a [u8; 32]
-                    let received_bytes: [u8; 32] = match account_data.dh_uk.try_into() {
-                        Ok(bytes) => bytes,
-                        Err(e) => panic!("Received Vec<u8> was not of length 32: {:?}", e),
-                    };
-
-                    let public_key = PublicKey::from(received_bytes);
+                    let public_key = PublicKey::from(account_data.dh_uk);
                     let dh_shared_secret = atm_secret.diffie_hellman(&public_key);
-
-                    println!("{:?}", dh_shared_secret.to_bytes());
 
                     //Serialized data to encrypt later
                     let serialized_data = serde_json::json!({
                         "id": account,
                         "hash": password_hash_bytes,
-                        "deposit" : withdraw,
+                        "amount" : withdraw,
                     });
 
                     let serialized_data_to_encrypt = serde_json::to_string(&serialized_data)
@@ -666,11 +613,8 @@ fn main() -> std::io::Result<()> {
 
                     // Now we use the DH secret as a key for AES256-GCM-SIV
                     let aes_gcm_key = GenericArray::from_slice(dh_shared_secret.as_bytes());
-
                     let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
-
                     let aes_gcm_nonce = Nonce::from_slice(&nonce); // 96-bits; unique per message
-
                     let aes_gcm_ciphertext = aes_gcm_cipher
                         .encrypt(
                             aes_gcm_nonce,
@@ -681,25 +625,13 @@ fn main() -> std::io::Result<()> {
                             exit(255);
                         });
 
-                    let deposit_request = MessageRequest::WithdrawRequest {
+                    let withdraw_request = MessageRequest::WithdrawRequest {
                         msg_id: account.clone(),
                         msg_nonce: aes_gcm_nonce.to_vec(),
                         msg_ciphertext: aes_gcm_ciphertext.to_vec(),
                     };
 
-                    let serialized_message = serde_json::to_string(&deposit_request)
-                        .unwrap_or_else(|e| {
-                            eprint!("Error serializing message {}", e);
-                            exit(255);
-                        });
-
-                    let serialized_with_newline = format!("{}\n", serialized_message);
-                    stream
-                        .write_all(serialized_with_newline.as_bytes())
-                        .unwrap_or_else(|e| {
-                            eprint!("Error sending message {}", e);
-                            exit(255);
-                        });
+                    serialize_and_send(&mut stream, &withdraw_request);
 
                     let mut reader = BufReader::new(&stream);
 
@@ -726,10 +658,10 @@ fn main() -> std::io::Result<()> {
                                 });
 
                             //Deserialize decrypted data into struct AccoundData(id,hash,balance)
-                            let account_data: AccountData4 =
+                            let account_data: AccountIdHashAmount =
                                 serde_json::from_slice(&plaintext).unwrap();
 
-                            if account_data.hash != password_hash_bytes {
+                            if &account_data.hash != password_hash_bytes {
                                 eprintln!("Something is wron the hashes aren't identical");
                                 exit(255);
                             }
@@ -787,13 +719,9 @@ fn main() -> std::io::Result<()> {
             rand::thread_rng().fill_bytes(&mut nonce);
 
             // Use the hash as a key for AES256-GCM-SIV
-
             let aes_gcm_key = GenericArray::from_slice(password_hash_bytes.as_slice());
-
             let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
-
             let aes_gcm_nonce = Nonce::from_slice(&nonce); // 96-bits; unique per message
-
             let aes_gcm_ciphertext = aes_gcm_cipher
                 .encrypt(
                     aes_gcm_nonce,
@@ -804,24 +732,13 @@ fn main() -> std::io::Result<()> {
                     exit(255);
                 });
 
-            let deposit_request = MessageRequest::GetBalanceRequest {
+            let getbalance_request = MessageRequest::GetBalanceRequest {
                 msg_id: account.clone(),
                 msg_nonce: aes_gcm_nonce.to_vec(),
                 msg_ciphertext: aes_gcm_ciphertext.to_vec(),
             };
 
-            let serialized_message = serde_json::to_string(&deposit_request).unwrap_or_else(|e| {
-                eprint!("Error serializing message {}", e);
-                exit(255);
-            });
-
-            let serialized_with_newline = format!("{}\n", serialized_message);
-            stream
-                .write_all(serialized_with_newline.as_bytes())
-                .unwrap_or_else(|e| {
-                    eprint!("Error sending message {}", e);
-                    exit(255);
-                });
+            serialize_and_send(&mut stream, &getbalance_request);
 
             /* This part of the code is to receive the response from the bank */
 
@@ -849,7 +766,7 @@ fn main() -> std::io::Result<()> {
                         });
 
                     //Deserialize decrypted data into struct AccoundData(id,hash,balance)
-                    let account_data: AccountData3 = serde_json::from_slice(&plaintext).unwrap();
+                    let account_data: AccountDHHash = serde_json::from_slice(&plaintext).unwrap();
 
                     if account_data.hash != password_hash_bytes {
                         eprintln!("Something is wron the hashes aren't identical");
@@ -859,16 +776,8 @@ fn main() -> std::io::Result<()> {
                     //Clean buffer
                     buffer.clear();
 
-                    // Convert the Vec<u8> to a [u8; 32]
-                    let received_bytes: [u8; 32] = match account_data.dh_uk.try_into() {
-                        Ok(bytes) => bytes,
-                        Err(e) => panic!("Received Vec<u8> was not of length 32: {:?}", e),
-                    };
-
-                    let public_key = PublicKey::from(received_bytes);
+                    let public_key = PublicKey::from(account_data.dh_uk);
                     let dh_shared_secret = atm_secret.diffie_hellman(&public_key);
-
-                    println!("{:?}", dh_shared_secret.to_bytes());
 
                     //Serialized data to encrypt later
                     let serialized_data = serde_json::json!({
@@ -885,9 +794,7 @@ fn main() -> std::io::Result<()> {
 
                     // Now we use the DH secret as a key for AES256-GCM-SIV
                     let aes_gcm_key = GenericArray::from_slice(dh_shared_secret.as_bytes());
-
                     let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
-
                     let aes_gcm_nonce = Nonce::from_slice(&nonce); // 96-bits; unique per message
 
                     let aes_gcm_ciphertext = aes_gcm_cipher
@@ -900,25 +807,13 @@ fn main() -> std::io::Result<()> {
                             exit(255);
                         });
 
-                    let deposit_request = MessageRequest::GetBalanceRequest {
+                    let getbalance_request = MessageRequest::GetBalanceRequest {
                         msg_id: account.clone(),
                         msg_nonce: aes_gcm_nonce.to_vec(),
                         msg_ciphertext: aes_gcm_ciphertext.to_vec(),
                     };
 
-                    let serialized_message = serde_json::to_string(&deposit_request)
-                        .unwrap_or_else(|e| {
-                            eprint!("Error serializing message {}", e);
-                            exit(255);
-                        });
-
-                    let serialized_with_newline = format!("{}\n", serialized_message);
-                    stream
-                        .write_all(serialized_with_newline.as_bytes())
-                        .unwrap_or_else(|e| {
-                            eprint!("Error sending message {}", e);
-                            exit(255);
-                        });
+                    serialize_and_send(&mut stream, &getbalance_request);
 
                     let mut reader = BufReader::new(&stream);
 
@@ -945,17 +840,17 @@ fn main() -> std::io::Result<()> {
                                 });
 
                             //Deserialize decrypted data into struct AccoundData(id,hash,balance)
-                            let account_data: AccountData5 =
+                            let account_data: AccountIdHashAmount =
                                 serde_json::from_slice(&plaintext).unwrap();
 
-                            if account_data.hash != password_hash_bytes {
+                            if &account_data.hash != password_hash_bytes {
                                 eprintln!("Something is wron the hashes aren't identical");
                                 exit(255);
                             }
 
                             let json_result_final = json!({
                                 "account": account,
-                                "balance": account_data.balance,
+                                "balance": account_data.amount,
                             });
 
                             println!("{}", json_result_final);

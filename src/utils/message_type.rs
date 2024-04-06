@@ -5,7 +5,7 @@ use std::vec::Vec;
 #[derive(Serialize, Deserialize, Debug)]
 pub enum MessageRequest {
     RegistrationRequest {
-        msg_nonce: String,
+        msg_nonce: Vec<u8>,
         msg_ciphertext: Vec<u8>,
         msg_atm_public_key: Vec<u8>,
         msg_hmac: Vec<u8>,
@@ -62,7 +62,7 @@ impl fmt::Display for MessageRequest {
             } => {
                 write!(
                     f,
-                    "RegistrationRequest: ciphertext={:?}, atm_public_key={:?}, hmac={:?}, nonce={}",
+                    "RegistrationRequest: ciphertext={:?}, atm_public_key={:?}, hmac={:?}, nonce={:?}",
                     msg_ciphertext, msg_atm_public_key, msg_hmac, msg_nonce
                 )
             }

@@ -1,4 +1,4 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 pub enum Operation {
     Balance(String),
@@ -7,40 +7,28 @@ pub enum Operation {
     Get,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct AccountData {
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AccountIdHashAmount {
     pub id: String,
     pub hash: [u8; 32],
-    pub balance: String,
+    pub amount: String,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct AccountData2 {
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AccountDataIdDHHash {
     pub id: String,
-    pub dh_uk: Vec<u8>,
-    pub hash: Vec<u8>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct AccountData3 {
-    pub dh_uk: Vec<u8>,
+    pub dh_uk: [u8; 32],
     pub hash: Vec<u8>,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct AccountData4 {
-    pub id: String,
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AccountDHHash {
+    pub dh_uk: [u8; 32],
     pub hash: Vec<u8>,
-    pub deposit: String,
 }
-#[derive(Debug, Deserialize)]
-pub struct AccountData5 {
-    pub id: String,
-    pub hash: Vec<u8>,
-    pub balance: String,
-}
-#[derive(Debug, Deserialize)]
-pub struct AccountData6 {
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AccountIDHash {
     pub id: String,
     pub hash: Vec<u8>,
 }
