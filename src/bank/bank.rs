@@ -68,6 +68,15 @@ fn handle_client(
                 msg_hmac,
                 msg_nonce,
             } => {
+                //Check for Repeated Nonces for Replay Attacks
+                let mut locked_nonces = nonces.lock().unwrap();
+                if locked_nonces.contains(&msg_nonce.to_vec()) {
+                    eprintln!("protocol_error");
+                    return;
+                } else {
+                    locked_nonces.push(msg_nonce);
+                }
+
                 //Decrypt received data
                 let decrypted_data = bank_private_key
                     .decrypt(Pkcs1v15Encrypt, msg_ciphertext.as_slice())
@@ -119,21 +128,6 @@ fn handle_client(
                     exit(255);
                 }
 
-                //Check for Repeated Nonces for Replay Attacks
-                let mut locked_nonces = nonces.lock().unwrap();
-                if locked_nonces.contains(&msg_nonce.to_vec()) {
-                    eprintln!("Replay attack detected");
-                    stream
-                        .write_all(serialized_bad_with_newline.as_bytes())
-                        .unwrap_or_else(|e| {
-                            eprint!("Error sending message {}", e);
-                            exit(255);
-                        });
-                    return;
-                } else {
-                    locked_nonces.push(msg_nonce);
-                }
-
                 //Encrypt with ATM Public Key
                 let mut rng = rand::thread_rng();
                 let received_atm_public_key = RsaPublicKey::from_pkcs1_der(&msg_atm_public_key)
@@ -144,35 +138,34 @@ fn handle_client(
                     .expect("failed to encrypt");
 
                 //Check if account is already registred, register account if not in the users_table
+                let mut successful_user_regist = true;
                 let mut locked_users_table = users_table.lock().unwrap();
                 if let std::collections::hash_map::Entry::Vacant(e) =
                     locked_users_table.entry(account_id.clone())
                 {
                     e.insert(hashed_password.to_vec());
                 } else {
-                    eprintln!("Account already registred");
-                    stream
-                        .write_all(serialized_bad_with_newline.as_bytes())
-                        .unwrap_or_else(|e| {
-                            eprint!("Error sending message {}", e);
-                            exit(255);
-                        });
-                    return;
+                    successful_user_regist = false;
                 }
 
                 //Insert account id and balance in the balance_table
+                let mut successful_balance_regist = true;
                 let mut locked_balance_table = balance_table.lock().unwrap();
                 if let std::collections::hash_map::Entry::Vacant(e) =
                     locked_balance_table.entry(account_id.clone())
                 {
                     e.insert(balancef64);
                 } else {
-                    stream
-                        .write_all(serialized_bad_with_newline.as_bytes())
-                        .unwrap_or_else(|e| {
-                            eprint!("Error sending message {}", e);
-                            exit(255);
-                        });
+                    successful_balance_regist = false;
+                }
+
+                //Rollback
+                if successful_user_regist && !successful_balance_regist {
+                    locked_users_table.remove_entry(&account_id);
+                } else if !successful_user_regist && successful_balance_regist {
+                    locked_balance_table.remove_entry(&account_id);
+                } else if !successful_balance_regist || !successful_user_regist {
+                    eprintln!("protocol_error");
                     return;
                 }
 
@@ -198,6 +191,14 @@ fn handle_client(
                 msg_nonce,
                 msg_ciphertext,
             } => {
+                //Check for Repeated Nonces for Replay Attacks
+                let mut locked_nonces = nonces.lock().unwrap();
+                if locked_nonces.contains(&msg_nonce.to_vec()) {
+                    eprintln!("protocol_error");
+                    return;
+                } else {
+                    locked_nonces.push(msg_nonce.clone());
+                }
                 //Generate ATM DH Public Key
                 let csprng = rand::thread_rng();
                 let bank_secret = EphemeralSecret::random_from_rng(csprng);
@@ -306,6 +307,12 @@ fn handle_client(
                     msg_ciphertext,
                 } = message
                 {
+                    if locked_nonces.contains(&msg_nonce.to_vec()) {
+                        eprintln!("protocol_error");
+                        return;
+                    } else {
+                        locked_nonces.push(msg_nonce.clone());
+                    }
                     // Use the hash as a key for AES256-GCM-SIV
                     let aes_gcm_key = GenericArray::from_slice(dh_shared_secret.as_bytes());
                     let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
@@ -341,12 +348,17 @@ fn handle_client(
                             exit(255);
                         })
                         .to_owned();
+
+                    let old_balance = user_balance;
                     let calculate_balance: f64 = account_data.amount.parse().unwrap();
                     let new_balance = user_balance + calculate_balance;
 
+                    let mut successful_newbalance = true;
                     match locked_balance_table.get_mut(&account_data.id) {
                         Some(value) => *value = new_balance,
-                        None => println!("Account not found"),
+                        None => {
+                            successful_newbalance = false;
+                        }
                     }
 
                     buffer.clear();
@@ -366,6 +378,7 @@ fn handle_client(
                     rand::thread_rng().fill_bytes(&mut nonce);
 
                     // Now we use the DH secret as a key for AES256-GCM-SIV
+                    let mut successful_decryption = true;
                     let aes_gcm_key = GenericArray::from_slice(dh_shared_secret.as_bytes());
                     let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
                     let aes_gcm_nonce = Nonce::from_slice(&nonce); // 96-bits; unique per message
@@ -374,10 +387,22 @@ fn handle_client(
                             aes_gcm_nonce,
                             serialized_data_to_encrypt.into_bytes().as_ref(),
                         )
-                        .unwrap_or_else(|e| {
-                            eprint!("Error encrypting with AES GCM {}", e);
-                            exit(255);
+                        .unwrap_or_else(|_| {
+                            //Rollback
+                            if successful_newbalance {
+                                if let Some(value) = locked_balance_table.get_mut(&account_data.id)
+                                {
+                                    *value = old_balance;
+                                }
+                            }
+                            successful_decryption = false;
+                            vec![]
                         });
+
+                    if !successful_newbalance || !successful_decryption {
+                        eprintln!("protocol_error");
+                        return;
+                    }
 
                     let deposit_response = MessageResponse::DepositResponse {
                         msg_ciphertext: aes_gcm_ciphertext,
@@ -401,6 +426,13 @@ fn handle_client(
                 msg_nonce,
                 msg_ciphertext,
             } => {
+                let mut locked_nonces = nonces.lock().unwrap();
+                if locked_nonces.contains(&msg_nonce.to_vec()) {
+                    eprintln!("protocol_error");
+                    return;
+                } else {
+                    locked_nonces.push(msg_nonce.clone());
+                }
                 //Generate ATM DH Public Key
                 let csprng = rand::thread_rng();
                 let bank_secret = EphemeralSecret::random_from_rng(csprng);
@@ -477,11 +509,8 @@ fn handle_client(
 
                 // Use the hash as a key for AES256-GCM-SIV
                 let aes_gcm_key = GenericArray::from_slice(hashed_password.as_slice());
-
                 let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
-
                 let aes_gcm_nonce = Nonce::from_slice(&response_nonce); // 96-bits; unique per message
-
                 let aes_gcm_ciphertext = aes_gcm_cipher
                     .encrypt(
                         aes_gcm_nonce,
@@ -511,6 +540,12 @@ fn handle_client(
                     msg_ciphertext,
                 } = message
                 {
+                    if locked_nonces.contains(&msg_nonce.to_vec()) {
+                        eprintln!("protocol_error");
+                        return;
+                    } else {
+                        locked_nonces.push(msg_nonce.clone());
+                    }
                     // Use the hash as a key for AES256-GCM-SIV
                     let aes_gcm_key = GenericArray::from_slice(dh_shared_secret.as_bytes());
                     let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
@@ -546,16 +581,18 @@ fn handle_client(
                             exit(255);
                         })
                         .to_owned();
+
+                    let old_balance = user_balance;
                     let calculate_balance: f64 = account_data.amount.parse().unwrap();
                     let new_balance = user_balance - calculate_balance;
-                    let success;
+
+                    let mut successful_withdraw = true;
                     if new_balance < 0.00 {
-                        success = false;
+                        return;
                     } else {
-                        success = true;
                         match locked_balance_table.get_mut(&account_data.id) {
                             Some(value) => *value = new_balance,
-                            None => println!("Account not found"),
+                            None => successful_withdraw = false,
                         }
                     }
 
@@ -576,38 +613,45 @@ fn handle_client(
                     rand::thread_rng().fill_bytes(&mut nonce);
 
                     // Now we use the DH secret as a key for AES256-GCM-SIV
+                    let mut successful_decryption = true;
                     let aes_gcm_key = GenericArray::from_slice(dh_shared_secret.as_bytes());
-
                     let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
-
                     let aes_gcm_nonce = Nonce::from_slice(&nonce); // 96-bits; unique per message
-
                     let aes_gcm_ciphertext = aes_gcm_cipher
                         .encrypt(
                             aes_gcm_nonce,
                             serialized_data_to_encrypt.into_bytes().as_ref(),
                         )
-                        .unwrap_or_else(|e| {
-                            eprint!("Error encrypting with AES GCM {}", e);
-                            exit(255);
+                        .unwrap_or_else(|_| {
+                            successful_decryption = false;
+                            if successful_withdraw {
+                                if let Some(value) = locked_balance_table.get_mut(&account_data.id)
+                                {
+                                    *value = old_balance;
+                                }
+                            }
+                            vec![]
                         });
 
+                    if !successful_withdraw || !successful_decryption {
+                        eprintln!("protocol_error");
+                        return;
+                    }
+
                     let withdraw_response = MessageResponse::WithdrawResponse {
-                        msg_success: success,
+                        msg_success: true,
                         msg_nonce: aes_gcm_nonce.to_vec(),
                         msg_ciphertext: aes_gcm_ciphertext,
                     };
 
                     serialize_and_write(&mut stream, &withdraw_response);
 
-                    if success {
-                        let json_result_final = json!({
-                            "account": account_data.id,
-                            "withdraw": account_data.amount,
-                        });
+                    let json_result_final = json!({
+                        "account": account_data.id,
+                        "withdraw": account_data.amount,
+                    });
 
-                        println!("{}", json_result_final);
-                    }
+                    println!("{}", json_result_final);
                 }
             }
 
@@ -616,6 +660,13 @@ fn handle_client(
                 msg_nonce,
                 msg_ciphertext,
             } => {
+                let mut locked_nonces = nonces.lock().unwrap();
+                if locked_nonces.contains(&msg_nonce.to_vec()) {
+                    eprintln!("protocol_error");
+                    return;
+                } else {
+                    locked_nonces.push(msg_nonce.clone());
+                }
                 //Generate ATM DH Public Key
                 let csprng = rand::thread_rng();
                 let bank_secret = EphemeralSecret::random_from_rng(csprng);
@@ -725,6 +776,12 @@ fn handle_client(
                     msg_ciphertext,
                 } = message
                 {
+                    if locked_nonces.contains(&msg_nonce.to_vec()) {
+                        eprintln!("protocol_error");
+                        return;
+                    } else {
+                        locked_nonces.push(msg_nonce.clone());
+                    }
                     // Use the hash as a key for AES256-GCM-SIV
                     let aes_gcm_key = GenericArray::from_slice(dh_shared_secret.as_bytes());
                     let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
