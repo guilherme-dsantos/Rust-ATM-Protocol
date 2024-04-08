@@ -145,8 +145,8 @@ fn main() -> std::io::Result<()> {
                 }
                 Operation::Deposit(value)
             } else if matches.is_present("withdraw") {
-                               let value = matches.value_of("withdraw").unwrap().to_string();
-                if !validate_number(&value, false){
+                let value = matches.value_of("withdraw").unwrap().to_string();
+                if !validate_number(&value, false) {
                     exit(255);
                 }
                 Operation::Withdraw(value)
@@ -586,7 +586,7 @@ fn main() -> std::io::Result<()> {
                     //Deserialize decrypted data into struct AccoundData(id,hash,balance)
                     let account_data: AccountDHHash = serde_json::from_slice(&plaintext).unwrap();
 
-                    if account_data.hash != password_hash_bytes {
+                    if account_data.hash != *password_hash_bytes {
                         eprintln!("Something is wron the hashes aren't identical");
                         exit(255);
                     }
@@ -768,7 +768,7 @@ fn main() -> std::io::Result<()> {
                     //Deserialize decrypted data into struct AccoundData(id,hash,balance)
                     let account_data: AccountDHHash = serde_json::from_slice(&plaintext).unwrap();
 
-                    if account_data.hash != password_hash_bytes {
+                    if account_data.hash != *password_hash_bytes {
                         eprintln!("Something is wron the hashes aren't identical");
                         exit(255);
                     }

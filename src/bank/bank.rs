@@ -50,7 +50,7 @@ fn handle_client(
     mut stream: TcpStream,
     _addr: SocketAddr,
     bank_private_key: Arc<RsaPrivateKey>,
-    users_table: Arc<Mutex<HashMap<String, Vec<u8>>>>,
+    users_table: Arc<Mutex<HashMap<String, [u8; 32]>>>,
     balance_table: Arc<Mutex<HashMap<String, f64>>>,
     nonces: Arc<Mutex<Vec<Vec<u8>>>>,
 ) {
@@ -143,7 +143,7 @@ fn handle_client(
                 if let std::collections::hash_map::Entry::Vacant(e) =
                     locked_users_table.entry(account_id.clone())
                 {
-                    e.insert(hashed_password.to_vec());
+                    e.insert(hashed_password);
                 } else {
                     successful_user_regist = false;
                 }
@@ -328,7 +328,7 @@ fn handle_client(
                     let account_data: AccountIdHashAmount =
                         serde_json::from_slice(&plaintext).unwrap();
 
-                    if account_data.hash != *hashed_password {
+                    if account_data.hash != hashed_password {
                         eprintln!("Something is wron the hashes aren't identical");
                         exit(255);
                     }
@@ -561,7 +561,7 @@ fn handle_client(
                     let account_data: AccountIdHashAmount =
                         serde_json::from_slice(&plaintext).unwrap();
 
-                    if account_data.hash != *hashed_password {
+                    if account_data.hash != hashed_password {
                         eprintln!("Something is wron the hashes aren't identical");
                         exit(255);
                     }
@@ -876,7 +876,7 @@ fn handle_client(
 }
 
 fn main() -> std::io::Result<()> {
-    let users_table: Arc<Mutex<HashMap<String, Vec<u8>>>> = Arc::new(Mutex::new(HashMap::new()));
+    let users_table: Arc<Mutex<HashMap<String, [u8; 32]>>> = Arc::new(Mutex::new(HashMap::new()));
     let balance_table: Arc<Mutex<HashMap<String, f64>>> = Arc::new(Mutex::new(HashMap::new()));
     let nonces = Arc::new(Mutex::new(Vec::<Vec<u8>>::new()));
 
