@@ -51,6 +51,15 @@ fn extract_public_key(file_path: &str) -> Result<RsaPublicKey, String> {
     }
 }
 
+pub fn is_new_card(file_path: &str) -> bool{
+    let path = Path::new(file_path);
+    println!("{}",&file_path);
+    if path.exists() {
+        return false;
+    } 
+    true
+}
+
 fn create_card_file(file_path: &str) {
     let path = Path::new(file_path);
     if path.exists() {
@@ -128,7 +137,7 @@ fn main() -> std::io::Result<()> {
                 .value_of("card-file")
                 .map(|s| s.to_string())
                 .unwrap_or(format!("{}{}", account, ".card"));
-            if !validate_file_name(&card_file) {
+            if !validate_file_name(&card_file) || !is_new_card(&card_file) {
                 exit(255);
             }
 
