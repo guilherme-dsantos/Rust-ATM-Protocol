@@ -53,7 +53,6 @@ fn extract_public_key(file_path: &str) -> Result<RsaPublicKey, String> {
 
 pub fn is_new_card(file_path: &str) -> bool{
     let path = Path::new(file_path);
-    println!("{}",&file_path);
     if path.exists() {
         return false;
     } 
@@ -186,7 +185,6 @@ fn main() -> std::io::Result<()> {
 
     match operation {
         Operation::Balance(balance) => {
-            validate_number(&balance, true);
 
             /* This part of the code is to send a request to the bank to register the account */
 
