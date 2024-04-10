@@ -125,7 +125,7 @@ fn main() -> std::io::Result<()> {
             let account = matches
                 .value_of("account")
                 .unwrap_or_else(|| {
-                    exit(251);
+                    exit(255);
                 })
                 .to_string();
             if !validate_account(&account) {
@@ -136,13 +136,13 @@ fn main() -> std::io::Result<()> {
                 .value_of("card-file")
                 .map(|s| s.to_string())
                 .unwrap_or(format!("{}{}", account, ".card"));
-            if !validate_file_name(&card_file) || !is_new_card(&card_file) {
+            if !validate_file_name(&card_file){
                 exit(255);
             }
 
             let operation = if matches.is_present("balance") {
                 let value = matches.value_of("balance").unwrap().to_string();
-                if !validate_number(&value, true) {
+                if !validate_number(&value, true) || !is_new_card(&card_file) {
                     exit(255);
                 }
                 Operation::Balance(value)
