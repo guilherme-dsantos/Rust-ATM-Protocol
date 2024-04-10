@@ -29,6 +29,9 @@ use utils::{
     bank_parser,
     message_type::{MessageRequest, MessageResponse},
     operations::{AccountDataIdDHHash, AccountIDHash, AccountIdHashAmount},
+    validate_functions::{
+        validate_file_name, validate_port,
+    },
 };
 
 fn serialize_and_write<T: serde::Serialize>(stream: &mut TcpStream, message: &T) {
@@ -883,11 +886,17 @@ fn main() -> std::io::Result<()> {
     let (port, auth_file): (String, String) = match bank_parser::cli() {
         Ok(matches) => {
             let port = matches.value_of("port").unwrap_or("3000").to_string();
+            if !validate_port(&port) {
+                exit(255);
+            }
 
             let auth_file = matches
                 .value_of("auth-file")
                 .unwrap_or("bank.auth")
                 .to_string();
+            if !validate_file_name(&auth_file) {
+                exit(255);
+            }
 
             (port, auth_file)
         }

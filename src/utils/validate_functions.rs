@@ -7,7 +7,7 @@ pub fn validate_number(s: &str, balance: bool) -> bool{
             let value = match f64::from_str(s) {
                 Ok(v) => v,
                 Err(_) => {
-                    eprintln!("Failed to parse balance as a float.");
+                    //eprintln!("Failed to parse balance as a float.");
                     return false;
                 }
             };
@@ -19,7 +19,7 @@ pub fn validate_number(s: &str, balance: bool) -> bool{
             }
         }
         false => {
-            eprintln!("Not a match");
+            //eprintln!("Not a match");
             return false;
         }
     }
@@ -29,7 +29,7 @@ pub fn validate_number(s: &str, balance: bool) -> bool{
 pub fn validate_ip_address(s: &str) -> bool{
     let pattern = regex::Regex::new(r"^((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])$").unwrap();
     if !pattern.is_match(s) {
-        eprintln!("{}", &s);
+       // eprintln!("{}", &s);
         return false;
     }
     true
@@ -39,11 +39,11 @@ pub fn validate_port(s: &str) -> bool{
     if let Ok(port) = s.parse::<u16>() {
         //u16 goes to 65535
         if port < 1024 {
-            eprintln!("Port number out of valid range (1024-65535).");
+            //eprintln!("Port number out of valid range (1024-65535).");
             return false;
         }
     } else {
-        eprintln!("Invalid input: not a number or too big.");
+        //eprintln!("Invalid input: not a number or too big.");
         return false;
     }
     true
@@ -54,7 +54,7 @@ pub fn validate_account(account_name: &str) -> bool{
     let is_valid_name = valid_pattern.is_match(account_name);
 
     if !(is_valid_length && is_valid_name) {
-        eprintln!("Invalid account name: {}", account_name);
+        //eprintln!("Invalid account name: {}", account_name);
         return false;
     }
     true
