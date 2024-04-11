@@ -1,6 +1,6 @@
 extern crate utils;
 use aes_gcm_siv::{
-    aead::{Aead, KeyInit},
+    aead::{self, Aead, KeyInit},
     Aes256GcmSiv,
     Nonce, // Or `Aes128GcmSiv`
 };
@@ -8,8 +8,7 @@ use blake3::Hasher;
 use cipher::generic_array::GenericArray;
 use rand::RngCore;
 use rsa::{
-    pkcs1::DecodeRsaPublicKey, pkcs1::EncodeRsaPublicKey, pkcs8::LineEnding, Pkcs1v15Encrypt,
-    RsaPrivateKey, RsaPublicKey,
+    pkcs1::EncodeRsaPublicKey, pkcs8::LineEnding, Pkcs1v15Encrypt, RsaPrivateKey, RsaPublicKey,
 };
 use serde_json::json;
 use std::{
@@ -29,9 +28,7 @@ use utils::{
     bank_parser,
     message_type::{MessageRequest, MessageResponse},
     operations::{AccountDataIdDHHash, AccountIDHash, AccountIdHashAmount},
-    validate_functions::{
-        validate_file_name, validate_port,
-    },
+    validate_functions::{validate_file_name, validate_port},
 };
 
 fn serialize_and_write<T: serde::Serialize>(stream: &mut TcpStream, message: &T) {
@@ -67,7 +64,6 @@ fn handle_client(
         Ok(message) => match message {
             MessageRequest::RegistrationRequest {
                 msg_ciphertext,
-                msg_atm_public_key,
                 msg_hmac,
                 msg_nonce,
             } => {
@@ -77,7 +73,7 @@ fn handle_client(
                     eprintln!("protocol_error");
                     return;
                 } else {
-                    locked_nonces.push(msg_nonce);
+                    locked_nonces.push(msg_nonce.to_vec());
                 }
 
                 //Decrypt received data
@@ -102,7 +98,7 @@ fn handle_client(
                 let bad_registration_response = MessageResponse::RegistrationResponse {
                     msg_success: false,
                     msg_ciphertext: vec![],
-                    msg_hmac: vec![],
+                    msg_nonce: [0; 12],
                 };
 
                 let serialized_bad_message = serde_json::to_string(&bad_registration_response)
@@ -116,7 +112,7 @@ fn handle_client(
                 //Recreate HMAC
                 let mut new_hmac = Hasher::new_keyed(&hashed_password);
                 new_hmac.update(msg_ciphertext.as_slice());
-                new_hmac.update(msg_atm_public_key.as_slice());
+                new_hmac.update(&msg_nonce);
                 let hmac_bytes = new_hmac.finalize().as_bytes().to_owned();
 
                 //Check if HMACs are the same
@@ -131,6 +127,7 @@ fn handle_client(
                     exit(255);
                 }
 
+                /*
                 //Encrypt with ATM Public Key
                 let mut rng = rand::thread_rng();
                 let received_atm_public_key = RsaPublicKey::from_pkcs1_der(&msg_atm_public_key)
@@ -139,6 +136,32 @@ fn handle_client(
                 let enc_data = received_atm_public_key
                     .encrypt(&mut rng, Pkcs1v15Encrypt, &decrypted_data)
                     .expect("failed to encrypt");
+                */
+
+                // Generate a 12-byte nonce
+                let mut response_nonce = [0u8; 12];
+                rand::thread_rng().fill_bytes(&mut response_nonce);
+
+                // Use the hash as a key for AES256-GCM-SIV
+                let aes_gcm_key = GenericArray::from_slice(hashed_password.as_slice());
+                let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
+                let aes_gcm_nonce = Nonce::from_slice(&response_nonce); // 96-bits; unique per message
+
+                // Additional associated data (AAD)
+                let aad = [aes_gcm_nonce.to_vec(), account_id.as_bytes().to_vec()].concat();
+
+                let aes_gcm_ciphertext = aes_gcm_cipher
+                    .encrypt(
+                        aes_gcm_nonce,
+                        aead::Payload {
+                            msg: &decrypted_data,
+                            aad: aad.as_slice(),
+                        },
+                    )
+                    .unwrap_or_else(|e| {
+                        eprint!("Error encrypting with AES GCM {}", e);
+                        exit(255);
+                    });
 
                 //Check if account is already registred, register account if not in the users_table
                 let mut successful_user_regist = true;
@@ -172,8 +195,8 @@ fn handle_client(
                     let registration_response = MessageResponse::RegistrationResponse {
                         msg_success: false,
                         msg_ciphertext: Vec::new(),
-                        msg_hmac: Vec::new(),
-                    };    
+                        msg_nonce: response_nonce,
+                    };
                     serialize_and_write(&mut stream, &registration_response);
                     return;
                 }
@@ -181,8 +204,8 @@ fn handle_client(
                 //Create Ok Registration Response to the ATM
                 let ok_registration_response = MessageResponse::RegistrationResponse {
                     msg_success: true,
-                    msg_ciphertext: enc_data,
-                    msg_hmac: hmac_bytes.to_vec(),
+                    msg_ciphertext: aes_gcm_ciphertext,
+                    msg_nonce: response_nonce,
                 };
 
                 serialize_and_write(&mut stream, &ok_registration_response);
@@ -209,7 +232,7 @@ fn handle_client(
                     eprintln!("protocol_error");
                     return;
                 } else {
-                    locked_nonces.push(msg_nonce.clone());
+                    locked_nonces.push(msg_nonce.to_vec());
                 }
                 //Generate ATM DH Public Key
                 let csprng = rand::thread_rng();
@@ -244,10 +267,20 @@ fn handle_client(
                 let aes_gcm_key = GenericArray::from_slice(&hashed_password_from_table);
                 let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
                 let aes_gcm_nonce = Nonce::from_slice(&msg_nonce); // 96-bits; unique per message
+
+                // Additional associated data (AAD)
+                let aad = [aes_gcm_nonce.to_vec(), msg_id.as_bytes().to_vec()].concat();
+
                 let plaintext = aes_gcm_cipher
-                    .decrypt(aes_gcm_nonce, msg_ciphertext.as_ref())
+                    .decrypt(
+                        aes_gcm_nonce,
+                        aead::Payload {
+                            msg: &msg_ciphertext,
+                            aad: aad.as_slice(),
+                        },
+                    )
                     .unwrap_or_else(|e| {
-                        eprint!("Error decrypting {}", e);
+                        eprint!("283 Error decrypting {}", e);
                         exit(255);
                     });
 
@@ -289,10 +322,17 @@ fn handle_client(
                 let aes_gcm_key = GenericArray::from_slice(hashed_password.as_slice());
                 let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
                 let aes_gcm_nonce = Nonce::from_slice(&response_nonce); // 96-bits; unique per message
+
+                // Additional associated data (AAD)
+                let aad = [aes_gcm_nonce.to_vec(), msg_id.as_bytes().to_vec()].concat();
+
                 let aes_gcm_ciphertext = aes_gcm_cipher
                     .encrypt(
                         aes_gcm_nonce,
-                        serialized_data_to_encrypt.to_string().into_bytes().as_ref(),
+                        aead::Payload {
+                            msg: serialized_data_to_encrypt.as_bytes(),
+                            aad: aad.as_slice(),
+                        },
                     )
                     .unwrap_or_else(|e| {
                         eprint!("Error encrypting with AES GCM {}", e);
@@ -301,7 +341,7 @@ fn handle_client(
 
                 let deposit_response = MessageResponse::DepositResponse {
                     msg_ciphertext: aes_gcm_ciphertext,
-                    msg_nonce: response_nonce.to_vec(),
+                    msg_nonce: response_nonce,
                     msg_success: true,
                 };
 
@@ -323,16 +363,26 @@ fn handle_client(
                         eprintln!("protocol_error");
                         return;
                     } else {
-                        locked_nonces.push(msg_nonce.clone());
+                        locked_nonces.push(msg_nonce.to_vec());
                     }
                     // Use the hash as a key for AES256-GCM-SIV
                     let aes_gcm_key = GenericArray::from_slice(dh_shared_secret.as_bytes());
                     let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
                     let aes_gcm_nonce = Nonce::from_slice(&msg_nonce); // 96-bits; unique per message
+
+                    // Additional associated data (AAD)
+                    let aad = [aes_gcm_nonce.to_vec(), msg_id.as_bytes().to_vec()].concat();
+
                     let plaintext = aes_gcm_cipher
-                        .decrypt(aes_gcm_nonce, msg_ciphertext.as_ref())
+                        .decrypt(
+                            aes_gcm_nonce,
+                            aead::Payload {
+                                msg: &msg_ciphertext,
+                                aad: aad.as_slice(),
+                            },
+                        )
                         .unwrap_or_else(|e| {
-                            eprint!("Error decrypting {}", e);
+                            eprint!(" 385 Error decrypting {}", e);
                             exit(255);
                         });
 
@@ -394,10 +444,17 @@ fn handle_client(
                     let aes_gcm_key = GenericArray::from_slice(dh_shared_secret.as_bytes());
                     let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
                     let aes_gcm_nonce = Nonce::from_slice(&nonce); // 96-bits; unique per message
+
+                    // Additional associated data (AAD)
+                    let aad = [aes_gcm_nonce.to_vec(), msg_id.as_bytes().to_vec()].concat();
+
                     let aes_gcm_ciphertext = aes_gcm_cipher
                         .encrypt(
                             aes_gcm_nonce,
-                            serialized_data_to_encrypt.into_bytes().as_ref(),
+                            aead::Payload {
+                                msg: serialized_data_to_encrypt.as_bytes(),
+                                aad: aad.as_slice(),
+                            },
                         )
                         .unwrap_or_else(|_| {
                             //Rollback
@@ -418,7 +475,7 @@ fn handle_client(
 
                     let deposit_response = MessageResponse::DepositResponse {
                         msg_ciphertext: aes_gcm_ciphertext,
-                        msg_nonce: aes_gcm_nonce.to_vec(),
+                        msg_nonce: nonce,
                         msg_success: true,
                     };
 
@@ -444,7 +501,7 @@ fn handle_client(
                     eprintln!("protocol_error");
                     return;
                 } else {
-                    locked_nonces.push(msg_nonce.clone());
+                    locked_nonces.push(msg_nonce.to_vec());
                 }
                 //Generate ATM DH Public Key
                 let csprng = rand::thread_rng();
@@ -479,8 +536,18 @@ fn handle_client(
                 let aes_gcm_key = GenericArray::from_slice(&hashed_password_from_table);
                 let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
                 let aes_gcm_nonce = Nonce::from_slice(&msg_nonce); // 96-bits; unique per message
+
+                // Additional associated data (AAD)
+                let aad = [aes_gcm_nonce.to_vec(), msg_id.as_bytes().to_vec()].concat();
+
                 let plaintext = aes_gcm_cipher
-                    .decrypt(aes_gcm_nonce, msg_ciphertext.as_ref())
+                    .decrypt(
+                        aes_gcm_nonce,
+                        aead::Payload {
+                            msg: &msg_ciphertext,
+                            aad: aad.as_slice(),
+                        },
+                    )
                     .unwrap_or_else(|e| {
                         eprint!("Error decrypting {}", e);
                         exit(255);
@@ -524,10 +591,17 @@ fn handle_client(
                 let aes_gcm_key = GenericArray::from_slice(hashed_password.as_slice());
                 let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
                 let aes_gcm_nonce = Nonce::from_slice(&response_nonce); // 96-bits; unique per message
+
+                // Additional associated data (AAD)
+                let aad = [aes_gcm_nonce.to_vec(), msg_id.as_bytes().to_vec()].concat();
+
                 let aes_gcm_ciphertext = aes_gcm_cipher
                     .encrypt(
                         aes_gcm_nonce,
-                        serialized_data_to_encrypt.to_string().into_bytes().as_ref(),
+                        aead::Payload {
+                            msg: serialized_data_to_encrypt.as_bytes(),
+                            aad: aad.as_slice(),
+                        },
                     )
                     .unwrap_or_else(|e| {
                         eprint!("Error encrypting with AES GCM {}", e);
@@ -557,14 +631,24 @@ fn handle_client(
                         eprintln!("protocol_error");
                         return;
                     } else {
-                        locked_nonces.push(msg_nonce.clone());
+                        locked_nonces.push(msg_nonce.to_vec());
                     }
                     // Use the hash as a key for AES256-GCM-SIV
                     let aes_gcm_key = GenericArray::from_slice(dh_shared_secret.as_bytes());
                     let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
                     let aes_gcm_nonce = Nonce::from_slice(&msg_nonce); // 96-bits; unique per message
+
+                    // Additional associated data (AAD)
+                    let aad = [aes_gcm_nonce.to_vec(), msg_id.as_bytes().to_vec()].concat();
+
                     let plaintext = aes_gcm_cipher
-                        .decrypt(aes_gcm_nonce, msg_ciphertext.as_ref())
+                        .decrypt(
+                            aes_gcm_nonce,
+                            aead::Payload {
+                                msg: &msg_ciphertext,
+                                aad: aad.as_slice(),
+                            },
+                        )
                         .unwrap_or_else(|e| {
                             eprint!("Error decrypting {}", e);
                             exit(255);
@@ -597,14 +681,14 @@ fn handle_client(
 
                     let old_balance = user_balance;
                     let calculate_balance: u64 = account_data.amount.parse().unwrap();
-                    
+
                     let mut successful_withdraw = true;
                     if calculate_balance > user_balance {
                         let withdraw_response = MessageResponse::WithdrawResponse {
                             msg_success: false,
                             msg_nonce: aes_gcm_nonce.to_vec(),
                             msg_ciphertext: Vec::new(),
-                        };    
+                        };
                         serialize_and_write(&mut stream, &withdraw_response);
                         return;
                     } else {
@@ -636,10 +720,17 @@ fn handle_client(
                     let aes_gcm_key = GenericArray::from_slice(dh_shared_secret.as_bytes());
                     let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
                     let aes_gcm_nonce = Nonce::from_slice(&nonce); // 96-bits; unique per message
+
+                    // Additional associated data (AAD)
+                    let aad = [aes_gcm_nonce.to_vec(), msg_id.as_bytes().to_vec()].concat();
+
                     let aes_gcm_ciphertext = aes_gcm_cipher
                         .encrypt(
                             aes_gcm_nonce,
-                            serialized_data_to_encrypt.into_bytes().as_ref(),
+                            aead::Payload {
+                                msg: serialized_data_to_encrypt.as_bytes(),
+                                aad: aad.as_slice(),
+                            },
                         )
                         .unwrap_or_else(|_| {
                             successful_decryption = false;
@@ -684,7 +775,7 @@ fn handle_client(
                     eprintln!("protocol_error");
                     return;
                 } else {
-                    locked_nonces.push(msg_nonce.clone());
+                    locked_nonces.push(msg_nonce.to_vec());
                 }
                 //Generate ATM DH Public Key
                 let csprng = rand::thread_rng();
@@ -719,8 +810,18 @@ fn handle_client(
                 let aes_gcm_key = GenericArray::from_slice(&hashed_password_from_table);
                 let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
                 let aes_gcm_nonce = Nonce::from_slice(&msg_nonce); // 96-bits; unique per message
+
+                // Additional associated data (AAD)
+                let aad = [aes_gcm_nonce.to_vec(), msg_id.as_bytes().to_vec()].concat();
+
                 let plaintext = aes_gcm_cipher
-                    .decrypt(aes_gcm_nonce, msg_ciphertext.as_ref())
+                    .decrypt(
+                        aes_gcm_nonce,
+                        aead::Payload {
+                            msg: &msg_ciphertext,
+                            aad: aad.as_slice(),
+                        },
+                    )
                     .unwrap_or_else(|e| {
                         eprint!("Error decrypting {}", e);
                         exit(255);
@@ -762,15 +863,19 @@ fn handle_client(
 
                 // Use the hash as a key for AES256-GCM-SIV
                 let aes_gcm_key = GenericArray::from_slice(hashed_password.as_slice());
-
                 let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
-
                 let aes_gcm_nonce = Nonce::from_slice(&response_nonce); // 96-bits; unique per message
+
+                // Additional associated data (AAD)
+                let aad = [aes_gcm_nonce.to_vec(), msg_id.as_bytes().to_vec()].concat();
 
                 let aes_gcm_ciphertext = aes_gcm_cipher
                     .encrypt(
                         aes_gcm_nonce,
-                        serialized_data_to_encrypt.to_string().into_bytes().as_ref(),
+                        aead::Payload {
+                            msg: serialized_data_to_encrypt.as_bytes(),
+                            aad: aad.as_slice(),
+                        },
                     )
                     .unwrap_or_else(|e| {
                         eprint!("Error encrypting with AES GCM {}", e);
@@ -799,14 +904,24 @@ fn handle_client(
                         eprintln!("protocol_error");
                         return;
                     } else {
-                        locked_nonces.push(msg_nonce.clone());
+                        locked_nonces.push(msg_nonce.to_vec());
                     }
                     // Use the hash as a key for AES256-GCM-SIV
                     let aes_gcm_key = GenericArray::from_slice(dh_shared_secret.as_bytes());
                     let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
                     let aes_gcm_nonce = Nonce::from_slice(&msg_nonce); // 96-bits; unique per message
+
+                    // Additional associated data (AAD)
+                    let aad = [aes_gcm_nonce.to_vec(), msg_id.as_bytes().to_vec()].concat();
+
                     let plaintext = aes_gcm_cipher
-                        .decrypt(aes_gcm_nonce, msg_ciphertext.as_ref())
+                        .decrypt(
+                            aes_gcm_nonce,
+                            aead::Payload {
+                                msg: &msg_ciphertext,
+                                aad: aad.as_slice(),
+                            },
+                        )
                         .unwrap_or_else(|e| {
                             eprint!("Error decrypting {}", e);
                             exit(255);
@@ -856,15 +971,19 @@ fn handle_client(
 
                     // Now we use the DH secret as a key for AES256-GCM-SIV
                     let aes_gcm_key = GenericArray::from_slice(dh_shared_secret.as_bytes());
-
                     let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
-
                     let aes_gcm_nonce = Nonce::from_slice(&nonce); // 96-bits; unique per message
+
+                    // Additional associated data (AAD)
+                    let aad = [aes_gcm_nonce.to_vec(), msg_id.as_bytes().to_vec()].concat();
 
                     let aes_gcm_ciphertext = aes_gcm_cipher
                         .encrypt(
                             aes_gcm_nonce,
-                            serialized_data_to_encrypt.into_bytes().as_ref(),
+                            aead::Payload {
+                                msg: serialized_data_to_encrypt.as_bytes(),
+                                aad: aad.as_slice(),
+                            },
                         )
                         .unwrap_or_else(|e| {
                             eprint!("Error encrypting with AES GCM {}", e);
