@@ -226,7 +226,7 @@ fn main() -> std::io::Result<()> {
             let serialized_data = serde_json::json!({
                 "id": account,
                 "hash": password_hash_slice,
-                "amount" : balance,
+                "amount" : balance.replace('.', ""),
             });
             let data_to_be_encrypted =
                 serde_json::to_string(&serialized_data).expect("Failed to serialize data to JSON");
@@ -426,7 +426,7 @@ fn main() -> std::io::Result<()> {
                     let serialized_data = serde_json::json!({
                         "id": account,
                         "hash": password_hash_bytes,
-                        "amount" : deposit,
+                        "amount" : deposit.replace('.', ""),
                     });
 
                     let serialized_data_to_encrypt = serde_json::to_string(&serialized_data)
@@ -608,7 +608,7 @@ fn main() -> std::io::Result<()> {
                     let serialized_data = serde_json::json!({
                         "id": account,
                         "hash": password_hash_bytes,
-                        "amount" : withdraw,
+                        "amount" : withdraw.replace('.', ""),
                     });
 
                     let serialized_data_to_encrypt = serde_json::to_string(&serialized_data)

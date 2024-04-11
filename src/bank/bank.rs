@@ -54,7 +54,7 @@ fn handle_client(
     _addr: SocketAddr,
     bank_private_key: Arc<RsaPrivateKey>,
     users_table: Arc<Mutex<HashMap<String, [u8; 32]>>>,
-    balance_table: Arc<Mutex<HashMap<String, f64>>>,
+    balance_table: Arc<Mutex<HashMap<String, i64>>>,
     nonces: Arc<Mutex<Vec<Vec<u8>>>>,
 ) {
     let mut buffer = Vec::new();
@@ -91,8 +91,8 @@ fn handle_client(
                 let account_id: String = account_data.id;
                 let hashed_password = account_data.hash;
                 let balance = account_data.amount;
-                let balancef64: f64 = balance.parse().unwrap_or_else(|e| {
-                    eprintln!("Error parsing string to f64 {}", e);
+                let balanceint: i64 = balance.parse().unwrap_or_else(|e| {
+                    eprintln!("Error parsing string to i64 {}", e);
                     exit(255);
                 });
 
@@ -157,7 +157,7 @@ fn handle_client(
                 if let std::collections::hash_map::Entry::Vacant(e) =
                     locked_balance_table.entry(account_id.clone())
                 {
-                    e.insert(balancef64);
+                    e.insert(balanceint);
                 } else {
                     successful_balance_regist = false;
                 }
@@ -181,9 +181,12 @@ fn handle_client(
 
                 serialize_and_write(&mut stream, &ok_registration_response);
 
+                //let amount = format!("{}.{}", balanceint / 100, balanceint % 100);
+                let amount = format!("{:.2}", balanceint as f64 / 100.0);
+                
                 let json_result = json!({
                     "account": account_id,
-                    "initial_balance": balance,
+                    "initial_balance": amount,
                 });
 
                 println!("{}", json_result);
@@ -353,7 +356,7 @@ fn handle_client(
                         .to_owned();
 
                     let old_balance = user_balance;
-                    let calculate_balance: f64 = account_data.amount.parse().unwrap();
+                    let calculate_balance: i64 = account_data.amount.parse().unwrap();
                     let new_balance = user_balance + calculate_balance;
 
                     let mut successful_newbalance = true;
@@ -415,10 +418,11 @@ fn handle_client(
 
                     //Send fourth message
                     serialize_and_write(&mut stream, &deposit_response);
+                    let amount = format!("{:.2}", calculate_balance as f64 / 100.0);
 
                     let json_result_final = json!({
                         "account": account_data.id,
-                        "deposit": account_data.amount,
+                        "deposit": amount,
                     });
 
                     println!("{}", json_result_final);
@@ -586,11 +590,11 @@ fn handle_client(
                         .to_owned();
 
                     let old_balance = user_balance;
-                    let calculate_balance: f64 = account_data.amount.parse().unwrap();
+                    let calculate_balance: i64 = account_data.amount.parse().unwrap();
                     let new_balance = user_balance - calculate_balance;
 
                     let mut successful_withdraw = true;
-                    if new_balance < 0.00 {
+                    if new_balance < 0 {
                         return;
                     } else {
                         match locked_balance_table.get_mut(&account_data.id) {
@@ -646,12 +650,12 @@ fn handle_client(
                         msg_nonce: aes_gcm_nonce.to_vec(),
                         msg_ciphertext: aes_gcm_ciphertext,
                     };
+                    let amount = format!("{:.2}", calculate_balance as f64 / 100.0);
 
                     serialize_and_write(&mut stream, &withdraw_response);
-
                     let json_result_final = json!({
                         "account": account_data.id,
-                        "withdraw": account_data.amount,
+                        "withdraw": amount,
                     });
 
                     println!("{}", json_result_final);
@@ -822,8 +826,8 @@ fn handle_client(
 
                     buffer.clear();
 
-                    let balance = format!("{:.2}", user_balance);
-
+                    //let balance = format!("{:.2}", user_balance);
+                    let balance = format!("{:.2}", user_balance as f64 / 100.0);
                     //Serialized data to encrypt later
                     let serialized_data = serde_json::json!({
                         "id": "Bank",
@@ -865,7 +869,7 @@ fn handle_client(
 
                     let json_result_final = json!({
                         "account": account_data.id,
-                        "balance": user_balance,
+                        "balance": balance,
                     });
 
                     println!("{}", json_result_final);
@@ -880,7 +884,7 @@ fn handle_client(
 
 fn main() -> std::io::Result<()> {
     let users_table: Arc<Mutex<HashMap<String, [u8; 32]>>> = Arc::new(Mutex::new(HashMap::new()));
-    let balance_table: Arc<Mutex<HashMap<String, f64>>> = Arc::new(Mutex::new(HashMap::new()));
+    let balance_table: Arc<Mutex<HashMap<String, i64>>> = Arc::new(Mutex::new(HashMap::new()));
     let nonces = Arc::new(Mutex::new(Vec::<Vec<u8>>::new()));
 
     let (port, auth_file): (String, String) = match bank_parser::cli() {
