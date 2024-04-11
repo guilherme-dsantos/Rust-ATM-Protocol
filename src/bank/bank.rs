@@ -183,7 +183,7 @@ fn handle_client(
 
                 //let amount = format!("{}.{}", balanceint / 100, balanceint % 100);
                 let amount = format!("{:.2}", balanceint as f64 / 100.0);
-                
+
                 let json_result = json!({
                     "account": account_id,
                     "initial_balance": amount,
@@ -595,6 +595,12 @@ fn handle_client(
 
                     let mut successful_withdraw = true;
                     if new_balance < 0 {
+                        let withdraw_response = MessageResponse::WithdrawResponse {
+                            msg_success: false,
+                            msg_nonce: aes_gcm_nonce.to_vec(),
+                            msg_ciphertext: Vec::new(),
+                        };    
+                        serialize_and_write(&mut stream, &withdraw_response);
                         return;
                     } else {
                         match locked_balance_table.get_mut(&account_data.id) {

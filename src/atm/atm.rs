@@ -680,6 +680,9 @@ fn main() -> std::io::Result<()> {
 
                             println!("{}", json_result_final);
                         }
+                        else {
+                            exit(255);
+                        }
                     }
                 }
             } else {
