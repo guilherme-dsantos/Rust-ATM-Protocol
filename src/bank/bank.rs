@@ -168,7 +168,13 @@ fn handle_client(
                 } else if !successful_user_regist && successful_balance_regist {
                     locked_balance_table.remove_entry(&account_id);
                 } else if !successful_balance_regist || !successful_user_regist {
-                    eprintln!("protocol_error");
+                    //eprintln!("protocol_error");
+                    let withdraw_response = MessageResponse::RegistrationResponse {
+                        msg_success: false,
+                        msg_ciphertext: Vec::new(),
+                        msg_hmac: Vec::new(),
+                    };    
+                    serialize_and_write(&mut stream, &withdraw_response);
                     return;
                 }
 

@@ -314,6 +314,9 @@ fn main() -> std::io::Result<()> {
                         eprintln!("Couldn't write to file: {}", e);
                     }
                 }
+                else{
+                    exit(255);
+                }
             } else {
                 println!("Received wrong message!");
             }
