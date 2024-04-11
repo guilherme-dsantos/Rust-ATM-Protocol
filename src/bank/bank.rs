@@ -54,7 +54,7 @@ fn handle_client(
     _addr: SocketAddr,
     bank_private_key: Arc<RsaPrivateKey>,
     users_table: Arc<Mutex<HashMap<String, [u8; 32]>>>,
-    balance_table: Arc<Mutex<HashMap<String, i64>>>,
+    balance_table: Arc<Mutex<HashMap<String, u64>>>,
     nonces: Arc<Mutex<Vec<Vec<u8>>>>,
 ) {
     let mut buffer = Vec::new();
@@ -91,8 +91,8 @@ fn handle_client(
                 let account_id: String = account_data.id;
                 let hashed_password = account_data.hash;
                 let balance = account_data.amount;
-                let balanceint: i64 = balance.parse().unwrap_or_else(|e| {
-                    eprintln!("Error parsing string to i64 {}", e);
+                let balanceu64: u64 = balance.parse().unwrap_or_else(|e| {
+                    eprintln!("Error parsing string to iu64 {}", e);
                     exit(255);
                 });
 
@@ -157,7 +157,7 @@ fn handle_client(
                 if let std::collections::hash_map::Entry::Vacant(e) =
                     locked_balance_table.entry(account_id.clone())
                 {
-                    e.insert(balanceint);
+                    e.insert(balanceu64);
                 } else {
                     successful_balance_regist = false;
                 }
@@ -169,12 +169,12 @@ fn handle_client(
                     locked_balance_table.remove_entry(&account_id);
                 } else if !successful_balance_regist || !successful_user_regist {
                     //eprintln!("protocol_error");
-                    let withdraw_response = MessageResponse::RegistrationResponse {
+                    let registration_response = MessageResponse::RegistrationResponse {
                         msg_success: false,
                         msg_ciphertext: Vec::new(),
                         msg_hmac: Vec::new(),
                     };    
-                    serialize_and_write(&mut stream, &withdraw_response);
+                    serialize_and_write(&mut stream, &registration_response);
                     return;
                 }
 
@@ -188,7 +188,7 @@ fn handle_client(
                 serialize_and_write(&mut stream, &ok_registration_response);
 
                 //let amount = format!("{}.{}", balanceint / 100, balanceint % 100);
-                let amount = format!("{:.2}", balanceint as f64 / 100.0);
+                let amount = format!("{:.2}", balanceu64 as f64 / 100.0);
 
                 let json_result = json!({
                     "account": account_id,
@@ -362,7 +362,7 @@ fn handle_client(
                         .to_owned();
 
                     let old_balance = user_balance;
-                    let calculate_balance: i64 = account_data.amount.parse().unwrap();
+                    let calculate_balance: u64 = account_data.amount.parse().unwrap();
                     let new_balance = user_balance + calculate_balance;
 
                     let mut successful_newbalance = true;
@@ -596,11 +596,10 @@ fn handle_client(
                         .to_owned();
 
                     let old_balance = user_balance;
-                    let calculate_balance: i64 = account_data.amount.parse().unwrap();
-                    let new_balance = user_balance - calculate_balance;
-
+                    let calculate_balance: u64 = account_data.amount.parse().unwrap();
+                    
                     let mut successful_withdraw = true;
-                    if new_balance < 0 {
+                    if calculate_balance > user_balance {
                         let withdraw_response = MessageResponse::WithdrawResponse {
                             msg_success: false,
                             msg_nonce: aes_gcm_nonce.to_vec(),
@@ -609,6 +608,7 @@ fn handle_client(
                         serialize_and_write(&mut stream, &withdraw_response);
                         return;
                     } else {
+                        let new_balance = user_balance - calculate_balance;
                         match locked_balance_table.get_mut(&account_data.id) {
                             Some(value) => *value = new_balance,
                             None => successful_withdraw = false,
@@ -896,7 +896,7 @@ fn handle_client(
 
 fn main() -> std::io::Result<()> {
     let users_table: Arc<Mutex<HashMap<String, [u8; 32]>>> = Arc::new(Mutex::new(HashMap::new()));
-    let balance_table: Arc<Mutex<HashMap<String, i64>>> = Arc::new(Mutex::new(HashMap::new()));
+    let balance_table: Arc<Mutex<HashMap<String, u64>>> = Arc::new(Mutex::new(HashMap::new()));
     let nonces = Arc::new(Mutex::new(Vec::<Vec<u8>>::new()));
 
     let (port, auth_file): (String, String) = match bank_parser::cli() {
