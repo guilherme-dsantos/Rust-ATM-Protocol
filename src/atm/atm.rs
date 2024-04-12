@@ -37,6 +37,44 @@ use utils::{
 };
 use x25519_dalek::{EphemeralSecret, PublicKey};
 
+fn encrypt_message(key: &[u8], data_to_encrypt: &str, nonce: &[u8]) -> Vec<u8> {
+    // Use the key for AES256-GCM-SIV
+    let aes_gcm_key = GenericArray::from_slice(key);
+    let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
+    let aes_gcm_nonce = Nonce::from_slice(nonce); // 96-bits; unique per message
+
+    aes_gcm_cipher
+        .encrypt(
+            aes_gcm_nonce,
+            aead::Payload {
+                msg: data_to_encrypt.as_bytes(),
+                aad: aes_gcm_nonce,
+            },
+        )
+        .unwrap_or_else(|e| {
+            eprintln!("Error encrypting with AES GCM {}", e);
+            exit(63);
+        })
+}
+
+fn decrypt_message(key: &[u8], nonce: &[u8], ciphertext: &[u8]) -> Vec<u8> {
+    let aes_gcm_key = GenericArray::from_slice(key);
+    let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
+    let aes_gcm_nonce = Nonce::from_slice(nonce);
+    aes_gcm_cipher
+        .decrypt(
+            aes_gcm_nonce,
+            aead::Payload {
+                msg: ciphertext,
+                aad: aes_gcm_nonce,
+            },
+        )
+        .unwrap_or_else(|e| {
+            eprintln!("Error decrypting {}", e);
+            exit(63);
+        })
+}
+
 fn extract_public_key(file_path: &str) -> Result<RsaPublicKey, String> {
     match fs::read_to_string(file_path) {
         Ok(content) => {
@@ -255,23 +293,7 @@ fn main() -> std::io::Result<()> {
                 msg_nonce,
             } = message
             {
-                // Use the hash as a key for AES256-GCM-SIV
-                let aes_gcm_key = GenericArray::from_slice(&password_hash_slice);
-                let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
-                let aes_gcm_nonce = Nonce::from_slice(&msg_nonce); // 96-bits; unique per message
-
-                let plaintext = aes_gcm_cipher
-                    .decrypt(
-                        aes_gcm_nonce,
-                        aead::Payload {
-                            msg: &msg_ciphertext,
-                            aad: aes_gcm_nonce,
-                        },
-                    )
-                    .unwrap_or_else(|e| {
-                        eprintln!("Error decrypting {}", e);
-                        exit(63);
-                    });
+                let plaintext = decrypt_message(&password_hash_slice, &msg_nonce, &msg_ciphertext);
 
                 if !msg_success {
                     exit(255);
@@ -342,28 +364,16 @@ fn main() -> std::io::Result<()> {
             let mut nonce = [0u8; 12];
             rand::thread_rng().fill_bytes(&mut nonce);
 
-            // Use the hash as a key for AES256-GCM-SIV
-            let aes_gcm_key = GenericArray::from_slice(password_hash_bytes.as_slice());
-            let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
-            let aes_gcm_nonce = Nonce::from_slice(&nonce); // 96-bits; unique per message
-
-            let aes_gcm_ciphertext = aes_gcm_cipher
-                .encrypt(
-                    aes_gcm_nonce,
-                    aead::Payload {
-                        msg: serialized_data_to_encrypt.as_bytes(),
-                        aad: aes_gcm_nonce,
-                    },
-                )
-                .unwrap_or_else(|e| {
-                    eprintln!("Error encrypting with AES GCM {}", e);
-                    exit(63);
-                });
+            let ciphertext = encrypt_message(
+                password_hash_bytes.as_slice(),
+                &serialized_data_to_encrypt,
+                &nonce,
+            );
 
             let deposit_request = MessageRequest::DepositRequest {
                 msg_id: account.clone(),
                 msg_nonce: nonce,
-                msg_ciphertext: aes_gcm_ciphertext.to_vec(),
+                msg_ciphertext: ciphertext,
             };
 
             //Send first deposit message
@@ -385,21 +395,8 @@ fn main() -> std::io::Result<()> {
                 msg_nonce,
             } = message
             {
-                let response_aes_gcm_nonce = Nonce::from_slice(&msg_nonce); // 96-bits; unique per message
-
-                //Decrypt the ciphertext with my hashed password
-                let plaintext = aes_gcm_cipher
-                    .decrypt(
-                        response_aes_gcm_nonce,
-                        aead::Payload {
-                            msg: &msg_ciphertext,
-                            aad: response_aes_gcm_nonce,
-                        },
-                    )
-                    .unwrap_or_else(|e| {
-                        eprintln!("Error decrypting {}", e);
-                        exit(63);
-                    });
+                let plaintext =
+                    decrypt_message(password_hash_bytes.as_slice(), &msg_nonce, &msg_ciphertext);
 
                 if !msg_success {
                     exit(255);
@@ -432,28 +429,16 @@ fn main() -> std::io::Result<()> {
                 let mut nonce = [0u8; 12];
                 rand::thread_rng().fill_bytes(&mut nonce);
 
-                // Now we use the DH secret as a key for AES256-GCM-SIV
-                let aes_gcm_key = GenericArray::from_slice(dh_shared_secret.as_bytes());
-                let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
-                let aes_gcm_nonce = Nonce::from_slice(&nonce); // 96-bits; unique per message
-
-                let aes_gcm_ciphertext = aes_gcm_cipher
-                    .encrypt(
-                        aes_gcm_nonce,
-                        aead::Payload {
-                            msg: serialized_data_to_encrypt.as_bytes(),
-                            aad: aes_gcm_nonce,
-                        },
-                    )
-                    .unwrap_or_else(|e| {
-                        eprintln!("Error encrypting with AES GCM {}", e);
-                        exit(63);
-                    });
+                let ciphertext = encrypt_message(
+                    dh_shared_secret.as_bytes(),
+                    &serialized_data_to_encrypt,
+                    &nonce,
+                );
 
                 let deposit_request = MessageRequest::DepositRequest {
                     msg_id: account.clone(),
                     msg_nonce: nonce,
-                    msg_ciphertext: aes_gcm_ciphertext.to_vec(),
+                    msg_ciphertext: ciphertext,
                 };
 
                 //Send third deposit message
@@ -469,23 +454,8 @@ fn main() -> std::io::Result<()> {
                     msg_nonce,
                 } = message
                 {
-                    // Use the hash as a key for AES256-GCM-SIV
-                    let aes_gcm_key = GenericArray::from_slice(dh_shared_secret.as_bytes());
-                    let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
-                    let aes_gcm_nonce = Nonce::from_slice(&msg_nonce); // 96-bits; unique per message
-
-                    let plaintext = aes_gcm_cipher
-                        .decrypt(
-                            aes_gcm_nonce,
-                            aead::Payload {
-                                msg: &msg_ciphertext,
-                                aad: aes_gcm_nonce,
-                            },
-                        )
-                        .unwrap_or_else(|e| {
-                            eprintln!("Error decrypting {}", e);
-                            exit(63);
-                        });
+                    let plaintext =
+                        decrypt_message(dh_shared_secret.as_bytes(), &msg_nonce, &msg_ciphertext);
 
                     if !msg_success {
                         exit(255);
@@ -553,29 +523,16 @@ fn main() -> std::io::Result<()> {
             let mut nonce = [0u8; 12];
             rand::thread_rng().fill_bytes(&mut nonce);
 
-            // Use the hash as a key for AES256-GCM-SIV
-
-            let aes_gcm_key = GenericArray::from_slice(password_hash_bytes.as_slice());
-            let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
-            let aes_gcm_nonce = Nonce::from_slice(&nonce); // 96-bits; unique per message
-
-            let aes_gcm_ciphertext = aes_gcm_cipher
-                .encrypt(
-                    aes_gcm_nonce,
-                    aead::Payload {
-                        msg: serialized_data_to_encrypt.as_bytes(),
-                        aad: aes_gcm_nonce,
-                    },
-                )
-                .unwrap_or_else(|e| {
-                    eprintln!("Error encrypting with AES GCM {}", e);
-                    exit(63);
-                });
+            let ciphertext = encrypt_message(
+                password_hash_bytes.as_slice(),
+                &serialized_data_to_encrypt,
+                &nonce,
+            );
 
             let withdraw_request = MessageRequest::WithdrawRequest {
                 msg_id: account.clone(),
                 msg_nonce: nonce,
-                msg_ciphertext: aes_gcm_ciphertext.to_vec(),
+                msg_ciphertext: ciphertext,
             };
 
             serialize_and_send(&mut stream, &withdraw_request);
@@ -595,21 +552,7 @@ fn main() -> std::io::Result<()> {
                 msg_nonce,
             } = message
             {
-                let response_aes_gcm_nonce = Nonce::from_slice(&msg_nonce); // 96-bits; unique per message
-
-                //Decrypt the ciphertext with my hashed password
-                let plaintext = aes_gcm_cipher
-                    .decrypt(
-                        response_aes_gcm_nonce,
-                        aead::Payload {
-                            msg: &msg_ciphertext,
-                            aad: response_aes_gcm_nonce,
-                        },
-                    )
-                    .unwrap_or_else(|e| {
-                        eprintln!("Error decrypting {}", e);
-                        exit(63);
-                    });
+                let plaintext = decrypt_message(password_hash_bytes, &msg_nonce, &msg_ciphertext);
 
                 if !msg_success {
                     exit(255);
@@ -637,28 +580,16 @@ fn main() -> std::io::Result<()> {
                 let mut nonce = [0u8; 12];
                 rand::thread_rng().fill_bytes(&mut nonce);
 
-                // Now we use the DH secret as a key for AES256-GCM-SIV
-                let aes_gcm_key = GenericArray::from_slice(dh_shared_secret.as_bytes());
-                let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
-                let aes_gcm_nonce = Nonce::from_slice(&nonce); // 96-bits; unique per message
-
-                let aes_gcm_ciphertext = aes_gcm_cipher
-                    .encrypt(
-                        aes_gcm_nonce,
-                        aead::Payload {
-                            msg: serialized_data_to_encrypt.as_bytes(),
-                            aad: aes_gcm_nonce,
-                        },
-                    )
-                    .unwrap_or_else(|e| {
-                        eprintln!("Error encrypting with AES GCM {}", e);
-                        exit(63);
-                    });
+                let ciphertext = encrypt_message(
+                    dh_shared_secret.as_bytes(),
+                    &serialized_data_to_encrypt,
+                    &nonce,
+                );
 
                 let withdraw_request = MessageRequest::WithdrawRequest {
                     msg_id: account.clone(),
                     msg_nonce: nonce,
-                    msg_ciphertext: aes_gcm_ciphertext.to_vec(),
+                    msg_ciphertext: ciphertext,
                 };
 
                 serialize_and_send(&mut stream, &withdraw_request);
@@ -675,23 +606,8 @@ fn main() -> std::io::Result<()> {
                     msg_ciphertext,
                 } = message
                 {
-                    // Use the hash as a key for AES256-GCM-SIV
-                    let aes_gcm_key = GenericArray::from_slice(dh_shared_secret.as_bytes());
-                    let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
-                    let aes_gcm_nonce = Nonce::from_slice(&msg_nonce); // 96-bits; unique per message
-
-                    let plaintext = aes_gcm_cipher
-                        .decrypt(
-                            aes_gcm_nonce,
-                            aead::Payload {
-                                msg: &msg_ciphertext,
-                                aad: aes_gcm_nonce,
-                            },
-                        )
-                        .unwrap_or_else(|e| {
-                            eprintln!("Error decrypting {}", e);
-                            exit(63);
-                        });
+                    let plaintext =
+                        decrypt_message(dh_shared_secret.as_bytes(), &msg_nonce, &msg_ciphertext);
 
                     if !msg_success {
                         exit(255);
@@ -759,28 +675,16 @@ fn main() -> std::io::Result<()> {
             let mut nonce = [0u8; 12];
             rand::thread_rng().fill_bytes(&mut nonce);
 
-            // Use the hash as a key for AES256-GCM-SIV
-            let aes_gcm_key = GenericArray::from_slice(password_hash_bytes.as_slice());
-            let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
-            let aes_gcm_nonce = Nonce::from_slice(&nonce); // 96-bits; unique per message
-
-            let aes_gcm_ciphertext = aes_gcm_cipher
-                .encrypt(
-                    aes_gcm_nonce,
-                    aead::Payload {
-                        msg: serialized_data_to_encrypt.as_bytes(),
-                        aad: aes_gcm_nonce,
-                    },
-                )
-                .unwrap_or_else(|e| {
-                    eprintln!("Error encrypting with AES GCM {}", e);
-                    exit(63);
-                });
+            let ciphertext = encrypt_message(
+                password_hash_bytes.as_slice(),
+                &serialized_data_to_encrypt,
+                &nonce,
+            );
 
             let getbalance_request = MessageRequest::GetBalanceRequest {
                 msg_id: account.clone(),
                 msg_nonce: nonce,
-                msg_ciphertext: aes_gcm_ciphertext.to_vec(),
+                msg_ciphertext: ciphertext,
             };
 
             serialize_and_send(&mut stream, &getbalance_request);
@@ -800,21 +704,7 @@ fn main() -> std::io::Result<()> {
                 msg_nonce,
             } = message
             {
-                let response_aes_gcm_nonce = Nonce::from_slice(&msg_nonce); // 96-bits; unique per message
-
-                //Decrypt the ciphertext with my hashed password
-                let plaintext = aes_gcm_cipher
-                    .decrypt(
-                        response_aes_gcm_nonce,
-                        aead::Payload {
-                            msg: &msg_ciphertext,
-                            aad: response_aes_gcm_nonce,
-                        },
-                    )
-                    .unwrap_or_else(|e| {
-                        eprintln!("Error decrypting {}", e);
-                        exit(63);
-                    });
+                let plaintext = decrypt_message(password_hash_bytes, &msg_nonce, &msg_ciphertext);
 
                 if !msg_success {
                     exit(255);
@@ -842,28 +732,16 @@ fn main() -> std::io::Result<()> {
                 let mut nonce = [0u8; 12];
                 rand::thread_rng().fill_bytes(&mut nonce);
 
-                // Now we use the DH secret as a key for AES256-GCM-SIV
-                let aes_gcm_key = GenericArray::from_slice(dh_shared_secret.as_bytes());
-                let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
-                let aes_gcm_nonce = Nonce::from_slice(&nonce); // 96-bits; unique per message
-
-                let aes_gcm_ciphertext = aes_gcm_cipher
-                    .encrypt(
-                        aes_gcm_nonce,
-                        aead::Payload {
-                            msg: serialized_data_to_encrypt.as_bytes(),
-                            aad: aes_gcm_nonce,
-                        },
-                    )
-                    .unwrap_or_else(|e| {
-                        eprintln!("Error encrypting with AES GCM {}", e);
-                        exit(63);
-                    });
+                let ciphertext = encrypt_message(
+                    dh_shared_secret.as_bytes(),
+                    &serialized_data_to_encrypt,
+                    &nonce,
+                );
 
                 let getbalance_request = MessageRequest::GetBalanceRequest {
                     msg_id: account.clone(),
                     msg_nonce: nonce,
-                    msg_ciphertext: aes_gcm_ciphertext.to_vec(),
+                    msg_ciphertext: ciphertext,
                 };
 
                 serialize_and_send(&mut stream, &getbalance_request);
@@ -880,23 +758,8 @@ fn main() -> std::io::Result<()> {
                     msg_ciphertext,
                 } = message
                 {
-                    // Use the hash as a key for AES256-GCM-SIV
-                    let aes_gcm_key = GenericArray::from_slice(dh_shared_secret.as_bytes());
-                    let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
-                    let aes_gcm_nonce = Nonce::from_slice(&msg_nonce); // 96-bits; unique per message
-
-                    let plaintext = aes_gcm_cipher
-                        .decrypt(
-                            aes_gcm_nonce,
-                            aead::Payload {
-                                msg: &msg_ciphertext,
-                                aad: aes_gcm_nonce,
-                            },
-                        )
-                        .unwrap_or_else(|e| {
-                            eprintln!("Error decrypting {}", e);
-                            exit(63);
-                        });
+                    let plaintext =
+                        decrypt_message(dh_shared_secret.as_bytes(), &msg_nonce, &msg_ciphertext);
 
                     if !msg_success {
                         exit(255);
