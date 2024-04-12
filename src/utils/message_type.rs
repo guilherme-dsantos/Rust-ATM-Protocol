@@ -39,12 +39,12 @@ pub enum MessageResponse {
     },
     WithdrawResponse {
         msg_success: bool,
-        msg_nonce: Vec<u8>,
+        msg_nonce: [u8; 12],
         msg_ciphertext: Vec<u8>,
     },
     GetBalanceResponse {
         msg_success: bool,
-        msg_nonce: Vec<u8>,
+        msg_nonce: [u8; 12],
         msg_ciphertext: Vec<u8>,
     },
 }

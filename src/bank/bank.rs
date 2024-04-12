@@ -31,6 +31,9 @@ use utils::{
     validate_functions::{validate_file_name, validate_port},
 };
 
+use std::process;
+use ctrlc::set_handler;
+
 fn serialize_and_write<T: serde::Serialize>(stream: &mut TcpStream, message: &T) {
     let serialized_message = serde_json::to_string(message).unwrap_or_else(|e| {
         eprint!("Error serializing message {}", e);
@@ -94,20 +97,6 @@ fn handle_client(
 
                 buffer.clear();
 
-                //This message is to send to the ATM if something goes wrong
-                let bad_registration_response = MessageResponse::RegistrationResponse {
-                    msg_success: false,
-                    msg_ciphertext: vec![],
-                    msg_nonce: [0; 12],
-                };
-
-                let serialized_bad_message = serde_json::to_string(&bad_registration_response)
-                    .unwrap_or_else(|e| {
-                        eprint!("Error serializing message {}", e);
-                        exit(255);
-                    });
-
-                let serialized_bad_with_newline = format!("{}\n", serialized_bad_message);
 
                 //Recreate HMAC
                 let mut new_hmac = Hasher::new_keyed(&hashed_password);
@@ -118,12 +107,6 @@ fn handle_client(
                 //Check if HMACs are the same
                 if msg_hmac != hmac_bytes {
                     eprintln!("Integrity attack detected!");
-                    stream
-                        .write_all(serialized_bad_with_newline.as_bytes())
-                        .unwrap_or_else(|e| {
-                            eprintln!("Error sending message {}", e);
-                            exit(255);
-                        });
                     exit(255);
                 }
 
@@ -194,7 +177,7 @@ fn handle_client(
                     //eprintln!("protocol_error");
                     let registration_response = MessageResponse::RegistrationResponse {
                         msg_success: false,
-                        msg_ciphertext: Vec::new(),
+                        msg_ciphertext: aes_gcm_ciphertext,
                         msg_nonce: response_nonce,
                     };
                     serialize_and_write(&mut stream, &registration_response);
@@ -610,7 +593,7 @@ fn handle_client(
 
                 let withdraw_response = MessageResponse::WithdrawResponse {
                     msg_ciphertext: aes_gcm_ciphertext,
-                    msg_nonce: response_nonce.to_vec(),
+                    msg_nonce: response_nonce,
                     msg_success: true,
                 };
 
@@ -683,14 +666,9 @@ fn handle_client(
                     let calculate_balance: u64 = account_data.amount.parse().unwrap();
 
                     let mut successful_withdraw = true;
+                    let mut positive_balance = true;
                     if calculate_balance > user_balance {
-                        let withdraw_response = MessageResponse::WithdrawResponse {
-                            msg_success: false,
-                            msg_nonce: aes_gcm_nonce.to_vec(),
-                            msg_ciphertext: Vec::new(),
-                        };
-                        serialize_and_write(&mut stream, &withdraw_response);
-                        return;
+                        positive_balance=false;
                     } else {
                         let new_balance = user_balance - calculate_balance;
                         match locked_balance_table.get_mut(&account_data.id) {
@@ -747,10 +725,19 @@ fn handle_client(
                         eprintln!("protocol_error");
                         return;
                     }
+                    if !positive_balance {
+                        let withdraw_response = MessageResponse::WithdrawResponse {
+                            msg_success: false,
+                            msg_nonce: nonce,
+                            msg_ciphertext: aes_gcm_ciphertext,
+                        };
+                        serialize_and_write(&mut stream, &withdraw_response);
+                        return;
+                    }
 
                     let withdraw_response = MessageResponse::WithdrawResponse {
                         msg_success: true,
-                        msg_nonce: aes_gcm_nonce.to_vec(),
+                        msg_nonce: nonce,
                         msg_ciphertext: aes_gcm_ciphertext,
                     };
                     let amount = format!("{:.2}", calculate_balance as f64 / 100.0);
@@ -884,7 +871,7 @@ fn handle_client(
 
                 let getbalance_response = MessageResponse::GetBalanceResponse {
                     msg_ciphertext: aes_gcm_ciphertext,
-                    msg_nonce: response_nonce.to_vec(),
+                    msg_nonce: response_nonce,
                     msg_success: true,
                 };
 
@@ -992,7 +979,7 @@ fn handle_client(
 
                     let deposit_response = MessageResponse::GetBalanceResponse {
                         msg_success: true,
-                        msg_nonce: aes_gcm_nonce.to_vec(),
+                        msg_nonce: nonce,
                         msg_ciphertext: aes_gcm_ciphertext,
                     };
 
@@ -1075,6 +1062,13 @@ fn main() -> std::io::Result<()> {
         eprintln!("Error host {}", e);
         exit(255);
     });
+
+    set_handler(move || {
+        println!("Received SIGTERM, exiting...");
+        process::exit(0);
+    }).expect("Error setting Ctrl-C handler");
+
+    println!("Waiting for SIGTERM...");
 
     loop {
         match listener.accept() {
