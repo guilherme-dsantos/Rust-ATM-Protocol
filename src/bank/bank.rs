@@ -31,8 +31,8 @@ use utils::{
     validate_functions::{validate_file_name, validate_port},
 };
 
-use std::process;
 use ctrlc::set_handler;
+use std::process;
 
 fn serialize_and_write<T: serde::Serialize>(stream: &mut TcpStream, message: &T) {
     let serialized_message = serde_json::to_string(message).unwrap_or_else(|e| {
@@ -64,7 +64,6 @@ fn handle_client(
 
     match reader.read_until(b'\n', &mut buffer) {
         Ok(_) => {
-
             match serde_json::from_slice::<MessageRequest>(&buffer) {
                 //Receive first registry message
                 Ok(message) => match message {
@@ -100,7 +99,6 @@ fn handle_client(
 
                         buffer.clear();
 
-
                         //Recreate HMAC
                         let mut new_hmac = Hasher::new_keyed(&hashed_password);
                         new_hmac.update(msg_ciphertext.as_slice());
@@ -113,17 +111,6 @@ fn handle_client(
                             exit(255);
                         }
 
-                        /*
-                        //Encrypt with ATM Public Key
-                        let mut rng = rand::thread_rng();
-                        let received_atm_public_key = RsaPublicKey::from_pkcs1_der(&msg_atm_public_key)
-                            .map_err(|e| format!("Error parsing public key: {}", e))
-                            .unwrap();
-                        let enc_data = received_atm_public_key
-                            .encrypt(&mut rng, Pkcs1v15Encrypt, &decrypted_data)
-                            .expect("failed to encrypt");
-                        */
-
                         // Generate a 12-byte nonce
                         let mut response_nonce = [0u8; 12];
                         rand::thread_rng().fill_bytes(&mut response_nonce);
@@ -133,15 +120,12 @@ fn handle_client(
                         let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
                         let aes_gcm_nonce = Nonce::from_slice(&response_nonce); // 96-bits; unique per message
 
-                        // Additional associated data (AAD)
-                        let aad = [aes_gcm_nonce.to_vec(), account_id.as_bytes().to_vec()].concat();
-
                         let aes_gcm_ciphertext = aes_gcm_cipher
                             .encrypt(
                                 aes_gcm_nonce,
                                 aead::Payload {
                                     msg: &decrypted_data,
-                                    aad: aad.as_slice(),
+                                    aad: aes_gcm_nonce,
                                 },
                             )
                             .unwrap_or_else(|e| {
@@ -254,15 +238,12 @@ fn handle_client(
                         let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
                         let aes_gcm_nonce = Nonce::from_slice(&msg_nonce); // 96-bits; unique per message
 
-                        // Additional associated data (AAD)
-                        let aad = [aes_gcm_nonce.to_vec(), msg_id.as_bytes().to_vec()].concat();
-
                         let plaintext = aes_gcm_cipher
                             .decrypt(
                                 aes_gcm_nonce,
                                 aead::Payload {
                                     msg: &msg_ciphertext,
-                                    aad: aad.as_slice(),
+                                    aad: aes_gcm_nonce,
                                 },
                             )
                             .unwrap_or_else(|e| {
@@ -273,7 +254,8 @@ fn handle_client(
                         buffer.clear();
 
                         //Deserialize decrypted data
-                        let account_data: AccountDataIdDHHash = serde_json::from_slice(&plaintext).unwrap();
+                        let account_data: AccountDataIdDHHash =
+                            serde_json::from_slice(&plaintext).unwrap();
                         let id = account_data.id;
                         let dh_uk = account_data.dh_uk;
                         let hashed_password = account_data.hash;
@@ -309,15 +291,12 @@ fn handle_client(
                         let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
                         let aes_gcm_nonce = Nonce::from_slice(&response_nonce); // 96-bits; unique per message
 
-                        // Additional associated data (AAD)
-                        let aad = [aes_gcm_nonce.to_vec(), msg_id.as_bytes().to_vec()].concat();
-
                         let aes_gcm_ciphertext = aes_gcm_cipher
                             .encrypt(
                                 aes_gcm_nonce,
                                 aead::Payload {
                                     msg: serialized_data_to_encrypt.as_bytes(),
-                                    aad: aad.as_slice(),
+                                    aad: aes_gcm_nonce,
                                 },
                             )
                             .unwrap_or_else(|e| {
@@ -356,15 +335,12 @@ fn handle_client(
                             let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
                             let aes_gcm_nonce = Nonce::from_slice(&msg_nonce); // 96-bits; unique per message
 
-                            // Additional associated data (AAD)
-                            let aad = [aes_gcm_nonce.to_vec(), msg_id.as_bytes().to_vec()].concat();
-
                             let plaintext = aes_gcm_cipher
                                 .decrypt(
                                     aes_gcm_nonce,
                                     aead::Payload {
                                         msg: &msg_ciphertext,
-                                        aad: aad.as_slice(),
+                                        aad: aes_gcm_nonce,
                                     },
                                 )
                                 .unwrap_or_else(|e| {
@@ -418,8 +394,9 @@ fn handle_client(
                                 "amount" : account_data.amount,
                             });
 
-                            let serialized_data_to_encrypt = serde_json::to_string(&serialized_data)
-                                .expect("Failed to serialize data to JSON");
+                            let serialized_data_to_encrypt =
+                                serde_json::to_string(&serialized_data)
+                                    .expect("Failed to serialize data to JSON");
 
                             // Generate a 12-byte nonce
                             let mut nonce = [0u8; 12];
@@ -431,21 +408,19 @@ fn handle_client(
                             let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
                             let aes_gcm_nonce = Nonce::from_slice(&nonce); // 96-bits; unique per message
 
-                            // Additional associated data (AAD)
-                            let aad = [aes_gcm_nonce.to_vec(), msg_id.as_bytes().to_vec()].concat();
-
                             let aes_gcm_ciphertext = aes_gcm_cipher
                                 .encrypt(
                                     aes_gcm_nonce,
                                     aead::Payload {
                                         msg: serialized_data_to_encrypt.as_bytes(),
-                                        aad: aad.as_slice(),
+                                        aad: aes_gcm_nonce,
                                     },
                                 )
                                 .unwrap_or_else(|_| {
                                     //Rollback
                                     if successful_newbalance {
-                                        if let Some(value) = locked_balance_table.get_mut(&account_data.id)
+                                        if let Some(value) =
+                                            locked_balance_table.get_mut(&account_data.id)
                                         {
                                             *value = old_balance;
                                         }
@@ -523,15 +498,12 @@ fn handle_client(
                         let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
                         let aes_gcm_nonce = Nonce::from_slice(&msg_nonce); // 96-bits; unique per message
 
-                        // Additional associated data (AAD)
-                        let aad = [aes_gcm_nonce.to_vec(), msg_id.as_bytes().to_vec()].concat();
-
                         let plaintext = aes_gcm_cipher
                             .decrypt(
                                 aes_gcm_nonce,
                                 aead::Payload {
                                     msg: &msg_ciphertext,
-                                    aad: aad.as_slice(),
+                                    aad: aes_gcm_nonce,
                                 },
                             )
                             .unwrap_or_else(|e| {
@@ -542,7 +514,8 @@ fn handle_client(
                         buffer.clear();
 
                         //Deserialize decrypted data
-                        let account_data: AccountDataIdDHHash = serde_json::from_slice(&plaintext).unwrap();
+                        let account_data: AccountDataIdDHHash =
+                            serde_json::from_slice(&plaintext).unwrap();
                         let id = account_data.id;
                         let dh_uk = account_data.dh_uk;
                         let hashed_password = account_data.hash;
@@ -578,15 +551,12 @@ fn handle_client(
                         let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
                         let aes_gcm_nonce = Nonce::from_slice(&response_nonce); // 96-bits; unique per message
 
-                        // Additional associated data (AAD)
-                        let aad = [aes_gcm_nonce.to_vec(), msg_id.as_bytes().to_vec()].concat();
-
                         let aes_gcm_ciphertext = aes_gcm_cipher
                             .encrypt(
                                 aes_gcm_nonce,
                                 aead::Payload {
                                     msg: serialized_data_to_encrypt.as_bytes(),
-                                    aad: aad.as_slice(),
+                                    aad: aes_gcm_nonce,
                                 },
                             )
                             .unwrap_or_else(|e| {
@@ -624,15 +594,12 @@ fn handle_client(
                             let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
                             let aes_gcm_nonce = Nonce::from_slice(&msg_nonce); // 96-bits; unique per message
 
-                            // Additional associated data (AAD)
-                            let aad = [aes_gcm_nonce.to_vec(), msg_id.as_bytes().to_vec()].concat();
-
                             let plaintext = aes_gcm_cipher
                                 .decrypt(
                                     aes_gcm_nonce,
                                     aead::Payload {
                                         msg: &msg_ciphertext,
-                                        aad: aad.as_slice(),
+                                        aad: aes_gcm_nonce,
                                     },
                                 )
                                 .unwrap_or_else(|e| {
@@ -671,7 +638,7 @@ fn handle_client(
                             let mut successful_withdraw = true;
                             let mut positive_balance = true;
                             if calculate_balance > user_balance {
-                                positive_balance=false;
+                                positive_balance = false;
                             } else {
                                 let new_balance = user_balance - calculate_balance;
                                 match locked_balance_table.get_mut(&account_data.id) {
@@ -689,8 +656,9 @@ fn handle_client(
                                 "amount" : account_data.amount,
                             });
 
-                            let serialized_data_to_encrypt = serde_json::to_string(&serialized_data)
-                                .expect("Failed to serialize data to JSON");
+                            let serialized_data_to_encrypt =
+                                serde_json::to_string(&serialized_data)
+                                    .expect("Failed to serialize data to JSON");
 
                             // Generate a 12-byte nonce
                             let mut nonce = [0u8; 12];
@@ -702,21 +670,19 @@ fn handle_client(
                             let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
                             let aes_gcm_nonce = Nonce::from_slice(&nonce); // 96-bits; unique per message
 
-                            // Additional associated data (AAD)
-                            let aad = [aes_gcm_nonce.to_vec(), msg_id.as_bytes().to_vec()].concat();
-
                             let aes_gcm_ciphertext = aes_gcm_cipher
                                 .encrypt(
                                     aes_gcm_nonce,
                                     aead::Payload {
                                         msg: serialized_data_to_encrypt.as_bytes(),
-                                        aad: aad.as_slice(),
+                                        aad: aes_gcm_nonce,
                                     },
                                 )
                                 .unwrap_or_else(|_| {
                                     successful_decryption = false;
                                     if successful_withdraw {
-                                        if let Some(value) = locked_balance_table.get_mut(&account_data.id)
+                                        if let Some(value) =
+                                            locked_balance_table.get_mut(&account_data.id)
                                         {
                                             *value = old_balance;
                                         }
@@ -801,15 +767,12 @@ fn handle_client(
                         let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
                         let aes_gcm_nonce = Nonce::from_slice(&msg_nonce); // 96-bits; unique per message
 
-                        // Additional associated data (AAD)
-                        let aad = [aes_gcm_nonce.to_vec(), msg_id.as_bytes().to_vec()].concat();
-
                         let plaintext = aes_gcm_cipher
                             .decrypt(
                                 aes_gcm_nonce,
                                 aead::Payload {
                                     msg: &msg_ciphertext,
-                                    aad: aad.as_slice(),
+                                    aad: aes_gcm_nonce,
                                 },
                             )
                             .unwrap_or_else(|e| {
@@ -820,7 +783,8 @@ fn handle_client(
                         buffer.clear();
 
                         //Deserialize decrypted data
-                        let account_data: AccountDataIdDHHash = serde_json::from_slice(&plaintext).unwrap();
+                        let account_data: AccountDataIdDHHash =
+                            serde_json::from_slice(&plaintext).unwrap();
                         let id = account_data.id;
                         let dh_uk = account_data.dh_uk;
                         let hashed_password = account_data.hash;
@@ -856,15 +820,12 @@ fn handle_client(
                         let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
                         let aes_gcm_nonce = Nonce::from_slice(&response_nonce); // 96-bits; unique per message
 
-                        // Additional associated data (AAD)
-                        let aad = [aes_gcm_nonce.to_vec(), msg_id.as_bytes().to_vec()].concat();
-
                         let aes_gcm_ciphertext = aes_gcm_cipher
                             .encrypt(
                                 aes_gcm_nonce,
                                 aead::Payload {
                                     msg: serialized_data_to_encrypt.as_bytes(),
-                                    aad: aad.as_slice(),
+                                    aad: aes_gcm_nonce,
                                 },
                             )
                             .unwrap_or_else(|e| {
@@ -901,15 +862,12 @@ fn handle_client(
                             let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
                             let aes_gcm_nonce = Nonce::from_slice(&msg_nonce); // 96-bits; unique per message
 
-                            // Additional associated data (AAD)
-                            let aad = [aes_gcm_nonce.to_vec(), msg_id.as_bytes().to_vec()].concat();
-
                             let plaintext = aes_gcm_cipher
                                 .decrypt(
                                     aes_gcm_nonce,
                                     aead::Payload {
                                         msg: &msg_ciphertext,
-                                        aad: aad.as_slice(),
+                                        aad: aes_gcm_nonce,
                                     },
                                 )
                                 .unwrap_or_else(|e| {
@@ -918,7 +876,8 @@ fn handle_client(
                                 });
 
                             //Deserialize decrypted data into struct AccoundData(id,hash,balance)
-                            let account_data: AccountIDHash = serde_json::from_slice(&plaintext).unwrap();
+                            let account_data: AccountIDHash =
+                                serde_json::from_slice(&plaintext).unwrap();
 
                             if account_data.hash != hashed_password {
                                 eprintln!("Something is wron the hashes aren't identical");
@@ -952,8 +911,9 @@ fn handle_client(
                                 "amount" : balance,
                             });
 
-                            let serialized_data_to_encrypt = serde_json::to_string(&serialized_data)
-                                .expect("Failed to serialize data to JSON");
+                            let serialized_data_to_encrypt =
+                                serde_json::to_string(&serialized_data)
+                                    .expect("Failed to serialize data to JSON");
 
                             // Generate a 12-byte nonce
                             let mut nonce = [0u8; 12];
@@ -964,15 +924,12 @@ fn handle_client(
                             let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
                             let aes_gcm_nonce = Nonce::from_slice(&nonce); // 96-bits; unique per message
 
-                            // Additional associated data (AAD)
-                            let aad = [aes_gcm_nonce.to_vec(), msg_id.as_bytes().to_vec()].concat();
-
                             let aes_gcm_ciphertext = aes_gcm_cipher
                                 .encrypt(
                                     aes_gcm_nonce,
                                     aead::Payload {
                                         msg: serialized_data_to_encrypt.as_bytes(),
-                                        aad: aad.as_slice(),
+                                        aad: aes_gcm_nonce,
                                     },
                                 )
                                 .unwrap_or_else(|e| {
@@ -1001,11 +958,11 @@ fn handle_client(
                     eprintln!("Error {}", e);
                 }
             }
-        },
+        }
         Err(e) => {
             eprintln!("Failed to read from stream: {}", e);
         }
-    }        
+    }
 }
 
 fn main() -> std::io::Result<()> {
@@ -1074,7 +1031,8 @@ fn main() -> std::io::Result<()> {
     set_handler(move || {
         //println!("Received SIGTERM, exiting...");
         process::exit(0);
-    }).expect("Error setting Ctrl-C handler");
+    })
+    .expect("Error setting Ctrl-C handler");
 
     loop {
         match listener.accept() {

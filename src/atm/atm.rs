@@ -247,7 +247,6 @@ fn main() -> std::io::Result<()> {
 
             let _ = reader.read_until(b'\n', &mut buffer).unwrap();
 
-
             let message = serde_json::from_slice::<MessageResponse>(&buffer).unwrap();
 
             if let MessageResponse::RegistrationResponse {
@@ -256,55 +255,44 @@ fn main() -> std::io::Result<()> {
                 msg_nonce,
             } = message
             {
-                    /*
-                    //Decrypt the ciphertext with ATM private key
-                    let decrypted_data = atm_private_key
-                        .decrypt(Pkcs1v15Encrypt, msg_ciphertext.as_slice())
-                        .expect("Error decrypting message");
-                    */
+                // Use the hash as a key for AES256-GCM-SIV
+                let aes_gcm_key = GenericArray::from_slice(&password_hash_slice);
+                let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
+                let aes_gcm_nonce = Nonce::from_slice(&msg_nonce); // 96-bits; unique per message
 
-                    // Use the hash as a key for AES256-GCM-SIV
-                    let aes_gcm_key = GenericArray::from_slice(&password_hash_slice);
-                    let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
-                    let aes_gcm_nonce = Nonce::from_slice(&msg_nonce); // 96-bits; unique per message
+                let plaintext = aes_gcm_cipher
+                    .decrypt(
+                        aes_gcm_nonce,
+                        aead::Payload {
+                            msg: &msg_ciphertext,
+                            aad: aes_gcm_nonce,
+                        },
+                    )
+                    .unwrap_or_else(|e| {
+                        eprintln!("Error decrypting {}", e);
+                        exit(63);
+                    });
 
-                    // Additional associated data (AAD)
-                    let aad = [aes_gcm_nonce.to_vec(), account.as_bytes().to_vec()].concat();
+                if !msg_success {
+                    exit(255);
+                }
+                //Deserialize decrypted data into struct AccoundData(id,hash,balance)
+                let account_data: AccountIdHashAmount = serde_json::from_slice(&plaintext).unwrap();
 
-                    let plaintext = aes_gcm_cipher
-                        .decrypt(
-                            aes_gcm_nonce,
-                            aead::Payload {
-                                msg: &msg_ciphertext,
-                                aad: aad.as_slice(),
-                            },
-                        )
-                        .unwrap_or_else(|e| {
-                            eprintln!("Error decrypting {}", e);
-                            exit(63);
-                        });
+                if account_data.hash != password_hash_slice {
+                    eprintln!("Detected MITM attack");
+                    exit(255);
+                }
 
-                    if !msg_success{
-                        exit(255);
-                    }
-                    //Deserialize decrypted data into struct AccoundData(id,hash,balance)
-                    let account_data: AccountIdHashAmount =
-                        serde_json::from_slice(&plaintext).unwrap();
+                //Clean buffer
+                buffer.clear();
 
-                    if account_data.hash != password_hash_slice {
-                        eprintln!("Detected MITM attack");
-                        exit(255);
-                    }
-
-                    //Clean buffer
-                    buffer.clear();
-
-                    create_card_file(&card_file);
-                    let mut file = OpenOptions::new().append(true).open(card_file).unwrap();
-                    let content = format!("{}\n{}", pin, salt.to_string().replace('"', ""));
-                    if let Err(e) = writeln!(file, "{}", &content) {
-                        eprintln!("Couldn't write to file: {}", e);
-                    }
+                create_card_file(&card_file);
+                let mut file = OpenOptions::new().append(true).open(card_file).unwrap();
+                let content = format!("{}\n{}", pin, salt.to_string().replace('"', ""));
+                if let Err(e) = writeln!(file, "{}", &content) {
+                    eprintln!("Couldn't write to file: {}", e);
+                }
             } else {
                 eprintln!("Received wrong message!");
             }
@@ -359,15 +347,12 @@ fn main() -> std::io::Result<()> {
             let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
             let aes_gcm_nonce = Nonce::from_slice(&nonce); // 96-bits; unique per message
 
-            // Additional associated data (AAD)
-            let aad = [aes_gcm_nonce.to_vec(), account.as_bytes().to_vec()].concat();
-
             let aes_gcm_ciphertext = aes_gcm_cipher
                 .encrypt(
                     aes_gcm_nonce,
                     aead::Payload {
                         msg: serialized_data_to_encrypt.as_bytes(),
-                        aad: aad.as_slice(),
+                        aad: aes_gcm_nonce,
                     },
                 )
                 .unwrap_or_else(|e| {
@@ -400,20 +385,101 @@ fn main() -> std::io::Result<()> {
                 msg_nonce,
             } = message
             {
-                
-                    let response_aes_gcm_nonce = Nonce::from_slice(&msg_nonce); // 96-bits; unique per message
+                let response_aes_gcm_nonce = Nonce::from_slice(&msg_nonce); // 96-bits; unique per message
 
-                    // Additional associated data (AAD)
-                    let aad =
-                        [response_aes_gcm_nonce.to_vec(), account.as_bytes().to_vec()].concat();
+                //Decrypt the ciphertext with my hashed password
+                let plaintext = aes_gcm_cipher
+                    .decrypt(
+                        response_aes_gcm_nonce,
+                        aead::Payload {
+                            msg: &msg_ciphertext,
+                            aad: response_aes_gcm_nonce,
+                        },
+                    )
+                    .unwrap_or_else(|e| {
+                        eprintln!("Error decrypting {}", e);
+                        exit(63);
+                    });
 
-                    //Decrypt the ciphertext with my hashed password
+                if !msg_success {
+                    exit(255);
+                }
+                //Deserialize decrypted data into struct AccoundData(id,hash,balance)
+                let account_data: AccountDHHash = serde_json::from_slice(&plaintext).unwrap();
+
+                if account_data.hash != password_hash_bytes {
+                    eprintln!("Something is wron the hashes aren't identical");
+                    exit(255);
+                }
+
+                //Clean buffer
+                buffer.clear();
+
+                let public_key = PublicKey::from(account_data.dh_uk);
+                let dh_shared_secret = atm_secret.diffie_hellman(&public_key);
+
+                //Serialized data to encrypt later
+                let serialized_data = serde_json::json!({
+                    "id": account,
+                    "hash": password_hash_bytes,
+                    "amount" : deposit.replace('.', ""),
+                });
+
+                let serialized_data_to_encrypt = serde_json::to_string(&serialized_data)
+                    .expect("Failed to serialize data to JSON");
+
+                // Generate a 12-byte nonce
+                let mut nonce = [0u8; 12];
+                rand::thread_rng().fill_bytes(&mut nonce);
+
+                // Now we use the DH secret as a key for AES256-GCM-SIV
+                let aes_gcm_key = GenericArray::from_slice(dh_shared_secret.as_bytes());
+                let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
+                let aes_gcm_nonce = Nonce::from_slice(&nonce); // 96-bits; unique per message
+
+                let aes_gcm_ciphertext = aes_gcm_cipher
+                    .encrypt(
+                        aes_gcm_nonce,
+                        aead::Payload {
+                            msg: serialized_data_to_encrypt.as_bytes(),
+                            aad: aes_gcm_nonce,
+                        },
+                    )
+                    .unwrap_or_else(|e| {
+                        eprintln!("Error encrypting with AES GCM {}", e);
+                        exit(63);
+                    });
+
+                let deposit_request = MessageRequest::DepositRequest {
+                    msg_id: account.clone(),
+                    msg_nonce: nonce,
+                    msg_ciphertext: aes_gcm_ciphertext.to_vec(),
+                };
+
+                //Send third deposit message
+                serialize_and_send(&mut stream, &deposit_request);
+
+                //Receive fourth deposit message
+                let mut reader = BufReader::new(&stream);
+                let _ = reader.read_until(b'\n', &mut buffer).unwrap();
+                let message = serde_json::from_slice::<MessageResponse>(&buffer).unwrap();
+                if let MessageResponse::DepositResponse {
+                    msg_success,
+                    msg_ciphertext,
+                    msg_nonce,
+                } = message
+                {
+                    // Use the hash as a key for AES256-GCM-SIV
+                    let aes_gcm_key = GenericArray::from_slice(dh_shared_secret.as_bytes());
+                    let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
+                    let aes_gcm_nonce = Nonce::from_slice(&msg_nonce); // 96-bits; unique per message
+
                     let plaintext = aes_gcm_cipher
                         .decrypt(
-                            response_aes_gcm_nonce,
+                            aes_gcm_nonce,
                             aead::Payload {
                                 msg: &msg_ciphertext,
-                                aad: aad.as_slice(),
+                                aad: aes_gcm_nonce,
                             },
                         )
                         .unwrap_or_else(|e| {
@@ -421,121 +487,25 @@ fn main() -> std::io::Result<()> {
                             exit(63);
                         });
 
-                    if !msg_success{
+                    if !msg_success {
                         exit(255);
                     }
                     //Deserialize decrypted data into struct AccoundData(id,hash,balance)
-                    let account_data: AccountDHHash = serde_json::from_slice(&plaintext).unwrap();
+                    let account_data: AccountIdHashAmount =
+                        serde_json::from_slice(&plaintext).unwrap();
 
                     if account_data.hash != password_hash_bytes {
                         eprintln!("Something is wron the hashes aren't identical");
                         exit(255);
                     }
 
-                    //Clean buffer
-                    buffer.clear();
-
-                    let public_key = PublicKey::from(account_data.dh_uk);
-                    let dh_shared_secret = atm_secret.diffie_hellman(&public_key);
-
-                    //Serialized data to encrypt later
-                    let serialized_data = serde_json::json!({
-                        "id": account,
-                        "hash": password_hash_bytes,
-                        "amount" : deposit.replace('.', ""),
+                    let json_result_final = json!({
+                        "account": account,
+                        "deposit": deposit,
                     });
 
-                    let serialized_data_to_encrypt = serde_json::to_string(&serialized_data)
-                        .expect("Failed to serialize data to JSON");
-
-                    // Generate a 12-byte nonce
-                    let mut nonce = [0u8; 12];
-                    rand::thread_rng().fill_bytes(&mut nonce);
-
-                    // Now we use the DH secret as a key for AES256-GCM-SIV
-                    let aes_gcm_key = GenericArray::from_slice(dh_shared_secret.as_bytes());
-                    let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
-                    let aes_gcm_nonce = Nonce::from_slice(&nonce); // 96-bits; unique per message
-
-                    // Additional associated data (AAD)
-                    let aad = [aes_gcm_nonce.to_vec(), account.as_bytes().to_vec()].concat();
-
-                    let aes_gcm_ciphertext = aes_gcm_cipher
-                        .encrypt(
-                            aes_gcm_nonce,
-                            aead::Payload {
-                                msg: serialized_data_to_encrypt.as_bytes(),
-                                aad: aad.as_slice(),
-                            },
-                        )
-                        .unwrap_or_else(|e| {
-                            eprintln!("Error encrypting with AES GCM {}", e);
-                            exit(63);
-                        });
-
-                    let deposit_request = MessageRequest::DepositRequest {
-                        msg_id: account.clone(),
-                        msg_nonce: nonce,
-                        msg_ciphertext: aes_gcm_ciphertext.to_vec(),
-                    };
-
-                    //Send third deposit message
-                    serialize_and_send(&mut stream, &deposit_request);
-
-                    //Receive fourth deposit message
-                    let mut reader = BufReader::new(&stream);
-                    let _ = reader.read_until(b'\n', &mut buffer).unwrap();
-                    let message = serde_json::from_slice::<MessageResponse>(&buffer).unwrap();
-                    if let MessageResponse::DepositResponse {
-                        msg_success,
-                        msg_ciphertext,
-                        msg_nonce,
-                    } = message
-                    {
-                        
-                            // Use the hash as a key for AES256-GCM-SIV
-                            let aes_gcm_key = GenericArray::from_slice(dh_shared_secret.as_bytes());
-                            let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
-                            let aes_gcm_nonce = Nonce::from_slice(&msg_nonce); // 96-bits; unique per message
-
-                            // Additional associated data (AAD)
-                            let aad =
-                                [aes_gcm_nonce.to_vec(), account.as_bytes().to_vec()].concat();
-
-                            let plaintext = aes_gcm_cipher
-                                .decrypt(
-                                    aes_gcm_nonce,
-                                    aead::Payload {
-                                        msg: &msg_ciphertext,
-                                        aad: aad.as_slice(),
-                                    },
-                                )
-                                .unwrap_or_else(|e| {
-                                    eprintln!("Error decrypting {}", e);
-                                    exit(63);
-                                });
-
-                            if !msg_success{
-                                exit(255);
-                            }
-                            //Deserialize decrypted data into struct AccoundData(id,hash,balance)
-                            let account_data: AccountIdHashAmount =
-                            serde_json::from_slice(&plaintext).unwrap();
-
-                            if account_data.hash != password_hash_bytes {
-                                eprintln!("Something is wron the hashes aren't identical");
-                                exit(255);
-                            }
-
-                            let json_result_final = json!({
-                                "account": account,
-                                "deposit": deposit,
-                            });
-
-                            println!("{}", json_result_final);
-                        
-                    }
-                
+                    println!("{}", json_result_final);
+                }
             } else {
                 eprintln!("Received wrong message!");
             }
@@ -589,14 +559,12 @@ fn main() -> std::io::Result<()> {
             let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
             let aes_gcm_nonce = Nonce::from_slice(&nonce); // 96-bits; unique per message
 
-            // Additional associated data (AAD)
-            let aad = [aes_gcm_nonce.to_vec(), account.as_bytes().to_vec()].concat();
             let aes_gcm_ciphertext = aes_gcm_cipher
                 .encrypt(
                     aes_gcm_nonce,
                     aead::Payload {
                         msg: serialized_data_to_encrypt.as_bytes(),
-                        aad: aad.as_slice(),
+                        aad: aes_gcm_nonce,
                     },
                 )
                 .unwrap_or_else(|e| {
@@ -627,20 +595,97 @@ fn main() -> std::io::Result<()> {
                 msg_nonce,
             } = message
             {
-                
-                    let response_aes_gcm_nonce = Nonce::from_slice(&msg_nonce); // 96-bits; unique per message
+                let response_aes_gcm_nonce = Nonce::from_slice(&msg_nonce); // 96-bits; unique per message
 
-                    // Additional associated data (AAD)
-                    let aad =
-                        [response_aes_gcm_nonce.to_vec(), account.as_bytes().to_vec()].concat();
+                //Decrypt the ciphertext with my hashed password
+                let plaintext = aes_gcm_cipher
+                    .decrypt(
+                        response_aes_gcm_nonce,
+                        aead::Payload {
+                            msg: &msg_ciphertext,
+                            aad: response_aes_gcm_nonce,
+                        },
+                    )
+                    .unwrap_or_else(|e| {
+                        eprintln!("Error decrypting {}", e);
+                        exit(63);
+                    });
 
-                    //Decrypt the ciphertext with my hashed password
+                if !msg_success {
+                    exit(255);
+                }
+                //Deserialize decrypted data into struct AccoundData(id,hash,balance)
+                let account_data: AccountDHHash = serde_json::from_slice(&plaintext).unwrap();
+
+                //Clean buffer
+                buffer.clear();
+
+                let public_key = PublicKey::from(account_data.dh_uk);
+                let dh_shared_secret = atm_secret.diffie_hellman(&public_key);
+
+                //Serialized data to encrypt later
+                let serialized_data = serde_json::json!({
+                    "id": account,
+                    "hash": password_hash_bytes,
+                    "amount" : withdraw.replace('.', ""),
+                });
+
+                let serialized_data_to_encrypt = serde_json::to_string(&serialized_data)
+                    .expect("Failed to serialize data to JSON");
+
+                // Generate a 12-byte nonce
+                let mut nonce = [0u8; 12];
+                rand::thread_rng().fill_bytes(&mut nonce);
+
+                // Now we use the DH secret as a key for AES256-GCM-SIV
+                let aes_gcm_key = GenericArray::from_slice(dh_shared_secret.as_bytes());
+                let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
+                let aes_gcm_nonce = Nonce::from_slice(&nonce); // 96-bits; unique per message
+
+                let aes_gcm_ciphertext = aes_gcm_cipher
+                    .encrypt(
+                        aes_gcm_nonce,
+                        aead::Payload {
+                            msg: serialized_data_to_encrypt.as_bytes(),
+                            aad: aes_gcm_nonce,
+                        },
+                    )
+                    .unwrap_or_else(|e| {
+                        eprintln!("Error encrypting with AES GCM {}", e);
+                        exit(63);
+                    });
+
+                let withdraw_request = MessageRequest::WithdrawRequest {
+                    msg_id: account.clone(),
+                    msg_nonce: nonce,
+                    msg_ciphertext: aes_gcm_ciphertext.to_vec(),
+                };
+
+                serialize_and_send(&mut stream, &withdraw_request);
+
+                let mut reader = BufReader::new(&stream);
+
+                let _ = reader.read_until(b'\n', &mut buffer).unwrap();
+
+                let message = serde_json::from_slice::<MessageResponse>(&buffer).unwrap();
+
+                if let MessageResponse::WithdrawResponse {
+                    msg_success,
+                    msg_nonce,
+                    msg_ciphertext,
+                } = message
+                {
+                    // Use the hash as a key for AES256-GCM-SIV
+                    let aes_gcm_key = GenericArray::from_slice(dh_shared_secret.as_bytes());
+                    let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
+                    let aes_gcm_nonce = Nonce::from_slice(&msg_nonce); // 96-bits; unique per message
+
                     let plaintext = aes_gcm_cipher
                         .decrypt(
-                            response_aes_gcm_nonce,
+                            aes_gcm_nonce,
                             aead::Payload {
                                 msg: &msg_ciphertext,
-                                aad: aad.as_slice(),
+                                aad: aes_gcm_nonce,
                             },
                         )
                         .unwrap_or_else(|e| {
@@ -648,119 +693,25 @@ fn main() -> std::io::Result<()> {
                             exit(63);
                         });
 
-                    
-                    if !msg_success{
+                    if !msg_success {
                         exit(255);
                     }
                     //Deserialize decrypted data into struct AccoundData(id,hash,balance)
-                    let account_data: AccountDHHash = serde_json::from_slice(&plaintext).unwrap();
+                    let account_data: AccountIdHashAmount =
+                        serde_json::from_slice(&plaintext).unwrap();
 
+                    if &account_data.hash != password_hash_bytes {
+                        eprintln!("Something is wron the hashes aren't identical");
+                        exit(255);
+                    }
 
-                    //Clean buffer
-                    buffer.clear();
-
-                    let public_key = PublicKey::from(account_data.dh_uk);
-                    let dh_shared_secret = atm_secret.diffie_hellman(&public_key);
-
-                    //Serialized data to encrypt later
-                    let serialized_data = serde_json::json!({
-                        "id": account,
-                        "hash": password_hash_bytes,
-                        "amount" : withdraw.replace('.', ""),
+                    let json_result_final = json!({
+                        "account": account,
+                        "withdraw": withdraw,
                     });
 
-                    let serialized_data_to_encrypt = serde_json::to_string(&serialized_data)
-                        .expect("Failed to serialize data to JSON");
-
-                    // Generate a 12-byte nonce
-                    let mut nonce = [0u8; 12];
-                    rand::thread_rng().fill_bytes(&mut nonce);
-
-                    // Now we use the DH secret as a key for AES256-GCM-SIV
-                    let aes_gcm_key = GenericArray::from_slice(dh_shared_secret.as_bytes());
-                    let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
-                    let aes_gcm_nonce = Nonce::from_slice(&nonce); // 96-bits; unique per message
-
-                    // Additional associated data (AAD)
-                    let aad = [aes_gcm_nonce.to_vec(), account.as_bytes().to_vec()].concat();
-
-                    let aes_gcm_ciphertext = aes_gcm_cipher
-                        .encrypt(
-                            aes_gcm_nonce,
-                            aead::Payload {
-                                msg: serialized_data_to_encrypt.as_bytes(),
-                                aad: aad.as_slice(),
-                            },
-                        )
-                        .unwrap_or_else(|e| {
-                            eprintln!("Error encrypting with AES GCM {}", e);
-                            exit(63);
-                        });
-
-                    let withdraw_request = MessageRequest::WithdrawRequest {
-                        msg_id: account.clone(),
-                        msg_nonce: nonce,
-                        msg_ciphertext: aes_gcm_ciphertext.to_vec(),
-                    };
-
-                    serialize_and_send(&mut stream, &withdraw_request);
-
-                    let mut reader = BufReader::new(&stream);
-
-                    let _ = reader.read_until(b'\n', &mut buffer).unwrap();
-
-                    let message = serde_json::from_slice::<MessageResponse>(&buffer).unwrap();
-
-                    if let MessageResponse::WithdrawResponse {
-                        msg_success,
-                        msg_nonce,
-                        msg_ciphertext,
-                    } = message
-                    {
-                        
-                            // Use the hash as a key for AES256-GCM-SIV
-                            let aes_gcm_key = GenericArray::from_slice(dh_shared_secret.as_bytes());
-                            let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
-                            let aes_gcm_nonce = Nonce::from_slice(&msg_nonce); // 96-bits; unique per message
-
-                            // Additional associated data (AAD)
-                            let aad =
-                                [aes_gcm_nonce.to_vec(), account.as_bytes().to_vec()].concat();
-
-                            let plaintext = aes_gcm_cipher
-                                .decrypt(
-                                    aes_gcm_nonce,
-                                    aead::Payload {
-                                        msg: &msg_ciphertext,
-                                        aad: aad.as_slice(),
-                                    },
-                                )
-                                .unwrap_or_else(|e| {
-                                    eprintln!("Error decrypting {}", e);
-                                    exit(63);
-                                });
-
-                            if !msg_success{
-                                exit(255);
-                            }
-                            //Deserialize decrypted data into struct AccoundData(id,hash,balance)
-                            let account_data: AccountIdHashAmount =
-                              serde_json::from_slice(&plaintext).unwrap();
-
-                            if &account_data.hash != password_hash_bytes {
-                                eprintln!("Something is wron the hashes aren't identical");
-                                exit(255);
-                            }
-
-                            let json_result_final = json!({
-                                "account": account,
-                                "withdraw": withdraw,
-                            });
-
-                            println!("{}", json_result_final);
-                        
-                    }
-                
+                    println!("{}", json_result_final);
+                }
             } else {
                 eprintln!("Received wrong message!");
             }
@@ -813,15 +764,12 @@ fn main() -> std::io::Result<()> {
             let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
             let aes_gcm_nonce = Nonce::from_slice(&nonce); // 96-bits; unique per message
 
-            // Additional associated data (AAD)
-            let aad = [aes_gcm_nonce.to_vec(), account.as_bytes().to_vec()].concat();
-
             let aes_gcm_ciphertext = aes_gcm_cipher
                 .encrypt(
                     aes_gcm_nonce,
                     aead::Payload {
                         msg: serialized_data_to_encrypt.as_bytes(),
-                        aad: aad.as_slice(),
+                        aad: aes_gcm_nonce,
                     },
                 )
                 .unwrap_or_else(|e| {
@@ -852,20 +800,97 @@ fn main() -> std::io::Result<()> {
                 msg_nonce,
             } = message
             {
-                
-                    let response_aes_gcm_nonce = Nonce::from_slice(&msg_nonce); // 96-bits; unique per message
+                let response_aes_gcm_nonce = Nonce::from_slice(&msg_nonce); // 96-bits; unique per message
 
-                    // Additional associated data (AAD)
-                    let aad =
-                        [response_aes_gcm_nonce.to_vec(), account.as_bytes().to_vec()].concat();
+                //Decrypt the ciphertext with my hashed password
+                let plaintext = aes_gcm_cipher
+                    .decrypt(
+                        response_aes_gcm_nonce,
+                        aead::Payload {
+                            msg: &msg_ciphertext,
+                            aad: response_aes_gcm_nonce,
+                        },
+                    )
+                    .unwrap_or_else(|e| {
+                        eprintln!("Error decrypting {}", e);
+                        exit(63);
+                    });
 
-                    //Decrypt the ciphertext with my hashed password
+                if !msg_success {
+                    exit(255);
+                }
+
+                //Deserialize decrypted data into struct AccoundData(id,hash,balance)
+                let account_data: AccountDHHash = serde_json::from_slice(&plaintext).unwrap();
+
+                //Clean buffer
+                buffer.clear();
+
+                let public_key = PublicKey::from(account_data.dh_uk);
+                let dh_shared_secret = atm_secret.diffie_hellman(&public_key);
+
+                //Serialized data to encrypt later
+                let serialized_data = serde_json::json!({
+                    "id": account,
+                    "hash": password_hash_bytes,
+                });
+
+                let serialized_data_to_encrypt = serde_json::to_string(&serialized_data)
+                    .expect("Failed to serialize data to JSON");
+
+                // Generate a 12-byte nonce
+                let mut nonce = [0u8; 12];
+                rand::thread_rng().fill_bytes(&mut nonce);
+
+                // Now we use the DH secret as a key for AES256-GCM-SIV
+                let aes_gcm_key = GenericArray::from_slice(dh_shared_secret.as_bytes());
+                let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
+                let aes_gcm_nonce = Nonce::from_slice(&nonce); // 96-bits; unique per message
+
+                let aes_gcm_ciphertext = aes_gcm_cipher
+                    .encrypt(
+                        aes_gcm_nonce,
+                        aead::Payload {
+                            msg: serialized_data_to_encrypt.as_bytes(),
+                            aad: aes_gcm_nonce,
+                        },
+                    )
+                    .unwrap_or_else(|e| {
+                        eprintln!("Error encrypting with AES GCM {}", e);
+                        exit(63);
+                    });
+
+                let getbalance_request = MessageRequest::GetBalanceRequest {
+                    msg_id: account.clone(),
+                    msg_nonce: nonce,
+                    msg_ciphertext: aes_gcm_ciphertext.to_vec(),
+                };
+
+                serialize_and_send(&mut stream, &getbalance_request);
+
+                let mut reader = BufReader::new(&stream);
+
+                let _ = reader.read_until(b'\n', &mut buffer).unwrap();
+
+                let message = serde_json::from_slice::<MessageResponse>(&buffer).unwrap();
+
+                if let MessageResponse::GetBalanceResponse {
+                    msg_success,
+                    msg_nonce,
+                    msg_ciphertext,
+                } = message
+                {
+                    // Use the hash as a key for AES256-GCM-SIV
+                    let aes_gcm_key = GenericArray::from_slice(dh_shared_secret.as_bytes());
+                    let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
+                    let aes_gcm_nonce = Nonce::from_slice(&msg_nonce); // 96-bits; unique per message
+
                     let plaintext = aes_gcm_cipher
                         .decrypt(
-                            response_aes_gcm_nonce,
+                            aes_gcm_nonce,
                             aead::Payload {
                                 msg: &msg_ciphertext,
-                                aad: aad.as_slice(),
+                                aad: aes_gcm_nonce,
                             },
                         )
                         .unwrap_or_else(|e| {
@@ -873,118 +898,25 @@ fn main() -> std::io::Result<()> {
                             exit(63);
                         });
 
+                    if !msg_success {
+                        exit(255);
+                    }
+                    //Deserialize decrypted data into struct AccoundData(id,hash,balance)
+                    let account_data: AccountIdHashAmount =
+                        serde_json::from_slice(&plaintext).unwrap();
 
-                    if !msg_success{
+                    if &account_data.hash != password_hash_bytes {
+                        eprintln!("Something is wron the hashes aren't identical");
                         exit(255);
                     }
 
-                    //Deserialize decrypted data into struct AccoundData(id,hash,balance)
-                    let account_data: AccountDHHash = serde_json::from_slice(&plaintext).unwrap();
-
-                    
-
-                    //Clean buffer
-                    buffer.clear();
-
-                    let public_key = PublicKey::from(account_data.dh_uk);
-                    let dh_shared_secret = atm_secret.diffie_hellman(&public_key);
-
-                    //Serialized data to encrypt later
-                    let serialized_data = serde_json::json!({
-                        "id": account,
-                        "hash": password_hash_bytes,
+                    let json_result_final = json!({
+                        "account": account,
+                        "balance": account_data.amount,
                     });
 
-                    let serialized_data_to_encrypt = serde_json::to_string(&serialized_data)
-                        .expect("Failed to serialize data to JSON");
-
-                    // Generate a 12-byte nonce
-                    let mut nonce = [0u8; 12];
-                    rand::thread_rng().fill_bytes(&mut nonce);
-
-                    // Now we use the DH secret as a key for AES256-GCM-SIV
-                    let aes_gcm_key = GenericArray::from_slice(dh_shared_secret.as_bytes());
-                    let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
-                    let aes_gcm_nonce = Nonce::from_slice(&nonce); // 96-bits; unique per message
-
-                    // Additional associated data (AAD)
-                    let aad = [aes_gcm_nonce.to_vec(), account.as_bytes().to_vec()].concat();
-
-                    let aes_gcm_ciphertext = aes_gcm_cipher
-                        .encrypt(
-                            aes_gcm_nonce,
-                            aead::Payload {
-                                msg: serialized_data_to_encrypt.as_bytes(),
-                                aad: aad.as_slice(),
-                            },
-                        )
-                        .unwrap_or_else(|e| {
-                            eprintln!("Error encrypting with AES GCM {}", e);
-                            exit(63);
-                        });
-
-                    let getbalance_request = MessageRequest::GetBalanceRequest {
-                        msg_id: account.clone(),
-                        msg_nonce: nonce,
-                        msg_ciphertext: aes_gcm_ciphertext.to_vec(),
-                    };
-
-                    serialize_and_send(&mut stream, &getbalance_request);
-
-                    let mut reader = BufReader::new(&stream);
-
-                    let _ = reader.read_until(b'\n', &mut buffer).unwrap();
-
-                    let message = serde_json::from_slice::<MessageResponse>(&buffer).unwrap();
-
-                    if let MessageResponse::GetBalanceResponse {
-                        msg_success,
-                        msg_nonce,
-                        msg_ciphertext,
-                    } = message
-                    {
-                            // Use the hash as a key for AES256-GCM-SIV
-                            let aes_gcm_key = GenericArray::from_slice(dh_shared_secret.as_bytes());
-                            let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
-                            let aes_gcm_nonce = Nonce::from_slice(&msg_nonce); // 96-bits; unique per message
-
-                            // Additional associated data (AAD)
-                            let aad =
-                                [aes_gcm_nonce.to_vec(), account.as_bytes().to_vec()].concat();
-
-                            let plaintext = aes_gcm_cipher
-                                .decrypt(
-                                    aes_gcm_nonce,
-                                    aead::Payload {
-                                        msg: &msg_ciphertext,
-                                        aad: aad.as_slice(),
-                                    },
-                                )
-                                .unwrap_or_else(|e| {
-                                    eprintln!("Error decrypting {}", e);
-                                    exit(63);
-                                });
-
-                            if !msg_success{
-                                exit(255);
-                            }
-                            //Deserialize decrypted data into struct AccoundData(id,hash,balance)
-                            let account_data: AccountIdHashAmount =
-                                serde_json::from_slice(&plaintext).unwrap();
-
-                            if &account_data.hash != password_hash_bytes {
-                                eprintln!("Something is wron the hashes aren't identical");
-                                exit(255);
-                            }
-
-                            let json_result_final = json!({
-                                "account": account,
-                                "balance": account_data.amount,
-                            });
-
-                            println!("{}", json_result_final);
-                    }
-                
+                    println!("{}", json_result_final);
+                }
             } else {
                 eprintln!("Received wrong message!");
             }
