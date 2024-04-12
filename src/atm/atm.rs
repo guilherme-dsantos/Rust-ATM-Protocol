@@ -60,10 +60,10 @@ fn create_card_file(file_path: &str) {
     let path = Path::new(file_path);
     if path.exists() {
         eprintln!("File already exists.");
-        exit(279);
+        exit(255);
     } else if fs::write(path, "").is_err() {
         eprintln!("Failed to write to file.");
-        exit(278);
+        exit(255);
     }
 }
 
@@ -165,13 +165,13 @@ fn main() -> std::io::Result<()> {
         }
         Err(e) => {
             eprint!("Erro {}", e);
-            exit(253);
+            exit(255);
         }
     };
 
     //Connect to the bank
     let mut stream = TcpStream::connect(format!("{}:{}", ip_address, port)).unwrap_or_else(|_| {
-        exit(254);
+        exit(63);
     });
 
     stream
@@ -245,11 +245,8 @@ fn main() -> std::io::Result<()> {
             let mut buffer = Vec::new();
             let mut reader = BufReader::new(&stream);
 
-            let bytes_read = reader.read_until(b'\n', &mut buffer).unwrap();
+            let _ = reader.read_until(b'\n', &mut buffer).unwrap();
 
-            if bytes_read == 0 {
-                exit(0);
-            }
 
             let message = serde_json::from_slice::<MessageResponse>(&buffer).unwrap();
 
@@ -274,7 +271,7 @@ fn main() -> std::io::Result<()> {
                     // Additional associated data (AAD)
                     let aad = [aes_gcm_nonce.to_vec(), account.as_bytes().to_vec()].concat();
 
-                    let plaintext = aes_gcm_cipher
+                    let _ = aes_gcm_cipher
                         .decrypt(
                             aes_gcm_nonce,
                             aead::Payload {
@@ -284,20 +281,16 @@ fn main() -> std::io::Result<()> {
                         )
                         .unwrap_or_else(|e| {
                             eprint!("Error decrypting {}", e);
-                            exit(255);
+                            exit(63);
                         });
 
                     if !msg_success{
                         exit(255);
                     }
                     //Deserialize decrypted data into struct AccoundData(id,hash,balance)
-                    let account_data: AccountIdHashAmount =
-                        serde_json::from_slice(&plaintext).unwrap();
+                    //let account_data: AccountIdHashAmount =
+                    //    serde_json::from_slice(&plaintext).unwrap();
 
-                    if account_data.hash != password_hash_slice {
-                        eprintln!("Detected MITM attack");
-                        exit(255);
-                    }
 
                     //Clean buffer
                     buffer.clear();
@@ -371,7 +364,7 @@ fn main() -> std::io::Result<()> {
                 )
                 .unwrap_or_else(|e| {
                     eprint!("Error encrypting with AES GCM {}", e);
-                    exit(255);
+                    exit(63);
                 });
 
             let deposit_request = MessageRequest::DepositRequest {
@@ -417,7 +410,7 @@ fn main() -> std::io::Result<()> {
                         )
                         .unwrap_or_else(|e| {
                             eprint!("Error decrypting {}", e);
-                            exit(255);
+                            exit(63);
                         });
 
                     if !msg_success{
@@ -425,11 +418,6 @@ fn main() -> std::io::Result<()> {
                     }
                     //Deserialize decrypted data into struct AccoundData(id,hash,balance)
                     let account_data: AccountDHHash = serde_json::from_slice(&plaintext).unwrap();
-
-                    if account_data.hash != password_hash_bytes {
-                        eprintln!("Something is wron the hashes aren't identical");
-                        exit(255);
-                    }
 
                     //Clean buffer
                     buffer.clear();
@@ -469,7 +457,7 @@ fn main() -> std::io::Result<()> {
                         )
                         .unwrap_or_else(|e| {
                             eprint!("Error encrypting with AES GCM {}", e);
-                            exit(255);
+                            exit(63);
                         });
 
                     let deposit_request = MessageRequest::DepositRequest {
@@ -501,7 +489,7 @@ fn main() -> std::io::Result<()> {
                             let aad =
                                 [aes_gcm_nonce.to_vec(), account.as_bytes().to_vec()].concat();
 
-                            let plaintext = aes_gcm_cipher
+                            let _ = aes_gcm_cipher
                                 .decrypt(
                                     aes_gcm_nonce,
                                     aead::Payload {
@@ -511,20 +499,15 @@ fn main() -> std::io::Result<()> {
                                 )
                                 .unwrap_or_else(|e| {
                                     eprint!("Error decrypting {}", e);
-                                    exit(255);
+                                    exit(63);
                                 });
 
                             if !msg_success{
                                 exit(255);
                             }
                             //Deserialize decrypted data into struct AccoundData(id,hash,balance)
-                            let account_data: AccountIdHashAmount =
-                                serde_json::from_slice(&plaintext).unwrap();
-
-                            if account_data.hash != password_hash_bytes {
-                                eprintln!("Something is wron the hashes aren't identical");
-                                exit(255);
-                            }
+                            //let account_data: AccountIdHashAmount =
+                            //    serde_json::from_slice(&plaintext).unwrap();
 
                             let json_result_final = json!({
                                 "account": account,
@@ -596,7 +579,7 @@ fn main() -> std::io::Result<()> {
                 )
                 .unwrap_or_else(|e| {
                     eprint!("Error encrypting with AES GCM {}", e);
-                    exit(255);
+                    exit(63);
                 });
 
             let withdraw_request = MessageRequest::WithdrawRequest {
@@ -640,7 +623,7 @@ fn main() -> std::io::Result<()> {
                         )
                         .unwrap_or_else(|e| {
                             eprint!("Error decrypting {}", e);
-                            exit(255);
+                            exit(63);
                         });
 
                     
@@ -689,7 +672,7 @@ fn main() -> std::io::Result<()> {
                         )
                         .unwrap_or_else(|e| {
                             eprint!("Error encrypting with AES GCM {}", e);
-                            exit(255);
+                            exit(63);
                         });
 
                     let withdraw_request = MessageRequest::WithdrawRequest {
@@ -722,7 +705,7 @@ fn main() -> std::io::Result<()> {
                             let aad =
                                 [aes_gcm_nonce.to_vec(), account.as_bytes().to_vec()].concat();
 
-                            let plaintext = aes_gcm_cipher
+                            let _ = aes_gcm_cipher
                                 .decrypt(
                                     aes_gcm_nonce,
                                     aead::Payload {
@@ -732,20 +715,16 @@ fn main() -> std::io::Result<()> {
                                 )
                                 .unwrap_or_else(|e| {
                                     eprint!("Error decrypting {}", e);
-                                    exit(255);
+                                    exit(63);
                                 });
 
                             if !msg_success{
                                 exit(255);
                             }
                             //Deserialize decrypted data into struct AccoundData(id,hash,balance)
-                            let account_data: AccountIdHashAmount =
-                                serde_json::from_slice(&plaintext).unwrap();
+                            //let account_data: AccountIdHashAmount =
+                            //  serde_json::from_slice(&plaintext).unwrap();
 
-                            if &account_data.hash != password_hash_bytes {
-                                eprintln!("Something is wron the hashes aren't identical");
-                                exit(255);
-                            }
 
                             let json_result_final = json!({
                                 "account": account,
@@ -817,7 +796,7 @@ fn main() -> std::io::Result<()> {
                 )
                 .unwrap_or_else(|e| {
                     eprint!("Error encrypting with AES GCM {}", e);
-                    exit(255);
+                    exit(63);
                 });
 
             let getbalance_request = MessageRequest::GetBalanceRequest {
@@ -861,7 +840,7 @@ fn main() -> std::io::Result<()> {
                         )
                         .unwrap_or_else(|e| {
                             eprint!("Error decrypting {}", e);
-                            exit(255);
+                            exit(63);
                         });
 
 
@@ -911,7 +890,7 @@ fn main() -> std::io::Result<()> {
                         )
                         .unwrap_or_else(|e| {
                             eprint!("Error encrypting with AES GCM {}", e);
-                            exit(255);
+                            exit(63);
                         });
 
                     let getbalance_request = MessageRequest::GetBalanceRequest {
@@ -953,7 +932,7 @@ fn main() -> std::io::Result<()> {
                                 )
                                 .unwrap_or_else(|e| {
                                     eprint!("Error decrypting {}", e);
-                                    exit(255);
+                                    exit(63);
                                 });
 
                             if !msg_success{
@@ -963,10 +942,6 @@ fn main() -> std::io::Result<()> {
                             let account_data: AccountIdHashAmount =
                                 serde_json::from_slice(&plaintext).unwrap();
 
-                            if &account_data.hash != password_hash_bytes {
-                                eprintln!("Something is wron the hashes aren't identical");
-                                exit(255);
-                            }
 
                             let json_result_final = json!({
                                 "account": account,
