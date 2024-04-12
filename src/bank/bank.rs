@@ -50,7 +50,7 @@ fn encrypt_message(key: &[u8], data_to_encrypt: &str, nonce: &[u8]) -> Vec<u8> {
         )
         .unwrap_or_else(|e| {
             eprintln!("Error encrypting with AES GCM {}", e);
-            exit(63);
+            vec![]
         })
 }
 
@@ -68,14 +68,14 @@ fn decrypt_message(key: &[u8], nonce: &[u8], ciphertext: &[u8]) -> Vec<u8> {
         )
         .unwrap_or_else(|e| {
             eprintln!("Error decrypting {}", e);
-            exit(63);
+            vec![]
         })
 }
 
 fn serialize_and_write<T: serde::Serialize>(stream: &mut TcpStream, message: &T) {
     let serialized_message = serde_json::to_string(message).unwrap_or_else(|e| {
         eprintln!("Error serializing message {}", e);
-        exit(255);
+        String::new()
     });
 
     let serialized_with_newline = format!("{}\n", serialized_message);
@@ -83,7 +83,6 @@ fn serialize_and_write<T: serde::Serialize>(stream: &mut TcpStream, message: &T)
         .write_all(serialized_with_newline.as_bytes())
         .unwrap_or_else(|e| {
             eprintln!("Error sending message {}", e);
-            exit(255);
         });
 }
 
@@ -132,7 +131,7 @@ fn handle_client(
                         let balance = account_data.amount;
                         let balanceu64: u64 = balance.parse().unwrap_or_else(|e| {
                             eprintln!("Error parsing string to iu64 {}", e);
-                            exit(255);
+                            1
                         });
 
                         buffer.clear();
@@ -146,7 +145,7 @@ fn handle_client(
                         //Check if HMACs are the same
                         if msg_hmac != hmac_bytes {
                             eprintln!("Integrity attack detected!");
-                            exit(255);
+                            return;
                         }
 
                         let serialized_data = serde_json::json!({
@@ -245,27 +244,16 @@ fn handle_client(
                         let bank_public = PublicKey::from(&bank_secret);
 
                         //Get user's password
-                        let locked_user_table = users_table.lock().unwrap_or_else(|e| {
-                            eprintln!("Error accessing users table {}", e);
-                            exit(255);
-                        });
+                        let locked_user_table = users_table.lock().unwrap();
 
-                        let mut locked_balance_table = balance_table.lock().unwrap_or_else(|e| {
-                            eprintln!("Error accessing users table {}", e);
-                            exit(255);
-                        });
+                        let mut locked_balance_table = balance_table.lock().unwrap();
 
-                        let hashed_password_from_table = locked_user_table
-                            .get(&msg_id)
-                            .unwrap_or_else(|| {
-                                eprintln!("ID Account doesn't exist");
-                                exit(255);
-                            })
-                            .to_owned();
+                        let hashed_password_from_table =
+                            locked_user_table.get(&msg_id).unwrap().to_owned();
 
                         if !locked_user_table.contains_key(&msg_id) {
                             eprintln!("Received invalid message from ATM, maybe MITM...");
-                            exit(255);
+                            return;
                         }
 
                         let plaintext = decrypt_message(
@@ -285,12 +273,12 @@ fn handle_client(
 
                         if msg_id != id {
                             eprintln!("Received invalid message from ATM, maybe MITM...");
-                            exit(255);
+                            return;
                         }
 
                         if hashed_password != hashed_password_from_table {
                             eprintln!("Something wrong");
-                            exit(255);
+                            return;
                         }
 
                         let public_key = PublicKey::from(dh_uk);
@@ -353,24 +341,13 @@ fn handle_client(
 
                             if account_data.hash != hashed_password {
                                 eprintln!("Something is wron the hashes aren't identical");
-                                exit(255);
+                                return;
                             }
 
-                            let _ = locked_user_table
-                                .get(&msg_id)
-                                .unwrap_or_else(|| {
-                                    eprintln!("ID Account doesn't exist");
-                                    exit(255);
-                                })
-                                .to_owned();
+                            let _ = locked_user_table.get(&msg_id).unwrap().to_owned();
 
-                            let user_balance = locked_balance_table
-                                .get(&msg_id)
-                                .unwrap_or_else(|| {
-                                    eprintln!("ID Account doesn't exist");
-                                    exit(255);
-                                })
-                                .to_owned();
+                            let user_balance =
+                                locked_balance_table.get(&msg_id).unwrap().to_owned();
 
                             let old_balance = user_balance;
                             let calculate_balance: u64 = account_data.amount.parse().unwrap();
@@ -469,27 +446,16 @@ fn handle_client(
                         let bank_public = PublicKey::from(&bank_secret);
 
                         //Get user's password
-                        let locked_user_table = users_table.lock().unwrap_or_else(|e| {
-                            eprintln!("Error accessing users table {}", e);
-                            exit(255);
-                        });
+                        let locked_user_table = users_table.lock().unwrap();
 
-                        let mut locked_balance_table = balance_table.lock().unwrap_or_else(|e| {
-                            eprintln!("Error accessing users table {}", e);
-                            exit(255);
-                        });
+                        let mut locked_balance_table = balance_table.lock().unwrap();
 
-                        let hashed_password_from_table = locked_user_table
-                            .get(&msg_id)
-                            .unwrap_or_else(|| {
-                                eprintln!("ID Account doesn't exist");
-                                exit(255);
-                            })
-                            .to_owned();
+                        let hashed_password_from_table =
+                            locked_user_table.get(&msg_id).unwrap().to_owned();
 
                         if !locked_user_table.contains_key(&msg_id) {
                             eprintln!("Received invalid message from ATM, maybe MITM...");
-                            exit(255);
+                            return;
                         }
 
                         let plaintext = decrypt_message(
@@ -509,12 +475,12 @@ fn handle_client(
 
                         if msg_id != id {
                             eprintln!("Received invalid message from ATM, maybe MITM...");
-                            exit(255);
+                            return;
                         }
 
                         if hashed_password != hashed_password_from_table {
                             eprintln!("Something wrong");
-                            exit(255);
+                            return;
                         }
 
                         let public_key = PublicKey::from(dh_uk);
@@ -576,24 +542,13 @@ fn handle_client(
 
                             if account_data.hash != hashed_password {
                                 eprintln!("Something is wron the hashes aren't identical");
-                                exit(255);
+                                return;
                             }
 
-                            let _ = locked_user_table
-                                .get(&msg_id)
-                                .unwrap_or_else(|| {
-                                    eprintln!("ID Account doesn't exist");
-                                    exit(255);
-                                })
-                                .to_owned();
+                            let _ = locked_user_table.get(&msg_id).unwrap().to_owned();
 
-                            let user_balance = locked_balance_table
-                                .get(&msg_id)
-                                .unwrap_or_else(|| {
-                                    eprintln!("ID Account doesn't exist");
-                                    exit(255);
-                                })
-                                .to_owned();
+                            let user_balance =
+                                locked_balance_table.get(&msg_id).unwrap().to_owned();
 
                             let old_balance = user_balance;
                             let calculate_balance: u64 = account_data.amount.parse().unwrap();
@@ -702,27 +657,16 @@ fn handle_client(
                         let bank_public = PublicKey::from(&bank_secret);
 
                         //Get user's password
-                        let locked_user_table = users_table.lock().unwrap_or_else(|e| {
-                            eprintln!("Error accessing users table {}", e);
-                            exit(255);
-                        });
+                        let locked_user_table = users_table.lock().unwrap();
 
-                        let locked_balance_table = balance_table.lock().unwrap_or_else(|e| {
-                            eprintln!("Error accessing users table {}", e);
-                            exit(255);
-                        });
+                        let locked_balance_table = balance_table.lock().unwrap();
 
-                        let hashed_password_from_table = locked_user_table
-                            .get(&msg_id)
-                            .unwrap_or_else(|| {
-                                eprintln!("ID Account doesn't exist");
-                                exit(255);
-                            })
-                            .to_owned();
+                        let hashed_password_from_table =
+                            locked_user_table.get(&msg_id).unwrap().to_owned();
 
                         if !locked_user_table.contains_key(&msg_id) {
                             eprintln!("Received invalid message from ATM, maybe MITM...");
-                            exit(255);
+                            return;
                         }
 
                         let plaintext = decrypt_message(
@@ -742,12 +686,12 @@ fn handle_client(
 
                         if msg_id != id {
                             eprintln!("Received invalid message from ATM, maybe MITM...");
-                            exit(255);
+                            return;
                         }
 
                         if hashed_password != hashed_password_from_table {
                             eprintln!("Something wrong");
-                            exit(255);
+                            return;
                         }
 
                         let public_key = PublicKey::from(dh_uk);
@@ -808,24 +752,13 @@ fn handle_client(
 
                             if account_data.hash != hashed_password {
                                 eprintln!("Something is wron the hashes aren't identical");
-                                exit(255);
+                                return;
                             }
 
-                            let _ = locked_user_table
-                                .get(&msg_id)
-                                .unwrap_or_else(|| {
-                                    eprintln!("ID Account doesn't exist");
-                                    exit(255);
-                                })
-                                .to_owned();
+                            let _ = locked_user_table.get(&msg_id).unwrap().to_owned();
 
-                            let user_balance = locked_balance_table
-                                .get(&msg_id)
-                                .unwrap_or_else(|| {
-                                    eprintln!("ID Account doesn't exist");
-                                    exit(255);
-                                })
-                                .to_owned();
+                            let user_balance =
+                                locked_balance_table.get(&msg_id).unwrap().to_owned();
 
                             buffer.clear();
 
