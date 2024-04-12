@@ -317,6 +317,7 @@ fn main() -> std::io::Result<()> {
                 }
             } else {
                 eprintln!("Received wrong message!");
+                exit(63);
             }
 
             let json_result = json!({
@@ -478,6 +479,7 @@ fn main() -> std::io::Result<()> {
                 }
             } else {
                 eprintln!("Received wrong message!");
+                exit(63);
             }
         }
 
@@ -630,6 +632,7 @@ fn main() -> std::io::Result<()> {
                 }
             } else {
                 eprintln!("Received wrong message!");
+                exit(63);
             }
         }
 
@@ -782,6 +785,7 @@ fn main() -> std::io::Result<()> {
                 }
             } else {
                 eprintln!("Received wrong message!");
+                exit(63);
             }
         }
     }

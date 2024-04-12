@@ -493,7 +493,7 @@ fn handle_client(
                         buffer.clear();
 
                         if plaintext.is_empty() {
-                            let deposit_response = MessageResponse::DepositResponse {
+                            let deposit_response = MessageResponse::WithdrawResponse {
                                 msg_ciphertext,
                                 msg_nonce,
                                 msg_success: false,
@@ -577,7 +577,7 @@ fn handle_client(
                             buffer.clear();
 
                             if plaintext.is_empty() {
-                                let deposit_response = MessageResponse::DepositResponse {
+                                let deposit_response = MessageResponse::WithdrawResponse {
                                     msg_ciphertext,
                                     msg_nonce,
                                     msg_success: false,
@@ -730,7 +730,7 @@ fn handle_client(
                         buffer.clear();
 
                         if plaintext.is_empty() {
-                            let deposit_response = MessageResponse::DepositResponse {
+                            let deposit_response = MessageResponse::GetBalanceResponse {
                                 msg_ciphertext,
                                 msg_nonce,
                                 msg_success: false,
@@ -813,7 +813,7 @@ fn handle_client(
                             buffer.clear();
 
                             if plaintext.is_empty() {
-                                let deposit_response = MessageResponse::DepositResponse {
+                                let deposit_response = MessageResponse::GetBalanceResponse {
                                     msg_ciphertext,
                                     msg_nonce,
                                     msg_success: false,
