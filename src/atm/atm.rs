@@ -323,6 +323,10 @@ fn main() -> std::io::Result<()> {
             let atm_public = PublicKey::from(&atm_secret);
 
             //Read PIN and Salt from card
+            if is_new_card(&card_file) {
+                eprintln!("Card file doesn't exist");
+                exit(255);
+            }
             let path = Path::new(&card_file);
             let file = File::open(path)?;
             let reader = io::BufReader::new(file);
@@ -543,6 +547,10 @@ fn main() -> std::io::Result<()> {
             let atm_secret = EphemeralSecret::random_from_rng(csprng);
             let atm_public = PublicKey::from(&atm_secret);
 
+            if is_new_card(&card_file) {
+                eprintln!("Card file doesn't exist");
+                exit(255);
+            }
             //Read PIN and Salt from card
             let path = Path::new(&card_file);
             let file = File::open(path)?;
@@ -764,6 +772,10 @@ fn main() -> std::io::Result<()> {
             let atm_secret = EphemeralSecret::random_from_rng(csprng);
             let atm_public = PublicKey::from(&atm_secret);
 
+            if is_new_card(&card_file) {
+                eprintln!("Card file doesn't exist");
+                exit(255);
+            }
             //Read PIN and Salt from card
             let path = Path::new(&card_file);
             let file = File::open(path)?;
