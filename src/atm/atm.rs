@@ -259,7 +259,6 @@ fn main() -> std::io::Result<()> {
                 msg_nonce,
             } = message
             {
-                if msg_success {
                     /*
                     //Decrypt the ciphertext with ATM private key
                     let decrypted_data = atm_private_key
@@ -287,6 +286,10 @@ fn main() -> std::io::Result<()> {
                             eprint!("Error decrypting {}", e);
                             exit(255);
                         });
+
+                    if !msg_success{
+                        exit(255);
+                    }
                     //Deserialize decrypted data into struct AccoundData(id,hash,balance)
                     let account_data: AccountIdHashAmount =
                         serde_json::from_slice(&plaintext).unwrap();
@@ -305,9 +308,6 @@ fn main() -> std::io::Result<()> {
                     if let Err(e) = writeln!(file, "{}", &content) {
                         eprintln!("Couldn't write to file: {}", e);
                     }
-                } else {
-                    exit(255);
-                }
             } else {
                 println!("Received wrong message!");
             }
@@ -399,7 +399,7 @@ fn main() -> std::io::Result<()> {
                 msg_nonce,
             } = message
             {
-                if msg_success {
+                
                     let response_aes_gcm_nonce = Nonce::from_slice(&msg_nonce); // 96-bits; unique per message
 
                     // Additional associated data (AAD)
@@ -420,6 +420,9 @@ fn main() -> std::io::Result<()> {
                             exit(255);
                         });
 
+                    if !msg_success{
+                        exit(255);
+                    }
                     //Deserialize decrypted data into struct AccoundData(id,hash,balance)
                     let account_data: AccountDHHash = serde_json::from_slice(&plaintext).unwrap();
 
@@ -488,7 +491,7 @@ fn main() -> std::io::Result<()> {
                         msg_nonce,
                     } = message
                     {
-                        if msg_success {
+                        
                             // Use the hash as a key for AES256-GCM-SIV
                             let aes_gcm_key = GenericArray::from_slice(dh_shared_secret.as_bytes());
                             let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
@@ -511,6 +514,9 @@ fn main() -> std::io::Result<()> {
                                     exit(255);
                                 });
 
+                            if !msg_success{
+                                exit(255);
+                            }
                             //Deserialize decrypted data into struct AccoundData(id,hash,balance)
                             let account_data: AccountIdHashAmount =
                                 serde_json::from_slice(&plaintext).unwrap();
@@ -526,9 +532,9 @@ fn main() -> std::io::Result<()> {
                             });
 
                             println!("{}", json_result_final);
-                        }
+                        
                     }
-                }
+                
             } else {
                 println!("Received wrong message!");
             }
@@ -616,7 +622,7 @@ fn main() -> std::io::Result<()> {
                 msg_nonce,
             } = message
             {
-                if msg_success {
+                
                     let response_aes_gcm_nonce = Nonce::from_slice(&msg_nonce); // 96-bits; unique per message
 
                     // Additional associated data (AAD)
@@ -637,13 +643,13 @@ fn main() -> std::io::Result<()> {
                             exit(255);
                         });
 
+                    
+                    if !msg_success{
+                        exit(255);
+                    }
                     //Deserialize decrypted data into struct AccoundData(id,hash,balance)
                     let account_data: AccountDHHash = serde_json::from_slice(&plaintext).unwrap();
 
-                    if account_data.hash != *password_hash_bytes {
-                        eprintln!("Something is wron the hashes aren't identical");
-                        exit(255);
-                    }
 
                     //Clean buffer
                     buffer.clear();
@@ -706,7 +712,7 @@ fn main() -> std::io::Result<()> {
                         msg_ciphertext,
                     } = message
                     {
-                        if msg_success {
+                        
                             // Use the hash as a key for AES256-GCM-SIV
                             let aes_gcm_key = GenericArray::from_slice(dh_shared_secret.as_bytes());
                             let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
@@ -729,6 +735,9 @@ fn main() -> std::io::Result<()> {
                                     exit(255);
                                 });
 
+                            if !msg_success{
+                                exit(255);
+                            }
                             //Deserialize decrypted data into struct AccoundData(id,hash,balance)
                             let account_data: AccountIdHashAmount =
                                 serde_json::from_slice(&plaintext).unwrap();
@@ -744,11 +753,9 @@ fn main() -> std::io::Result<()> {
                             });
 
                             println!("{}", json_result_final);
-                        } else {
-                            exit(255);
-                        }
+                        
                     }
-                }
+                
             } else {
                 println!("Received wrong message!");
             }
@@ -836,7 +843,7 @@ fn main() -> std::io::Result<()> {
                 msg_nonce,
             } = message
             {
-                if msg_success {
+                
                     let response_aes_gcm_nonce = Nonce::from_slice(&msg_nonce); // 96-bits; unique per message
 
                     // Additional associated data (AAD)
@@ -857,13 +864,15 @@ fn main() -> std::io::Result<()> {
                             exit(255);
                         });
 
+
+                    if !msg_success{
+                        exit(255);
+                    }
+
                     //Deserialize decrypted data into struct AccoundData(id,hash,balance)
                     let account_data: AccountDHHash = serde_json::from_slice(&plaintext).unwrap();
 
-                    if account_data.hash != *password_hash_bytes {
-                        eprintln!("Something is wron the hashes aren't identical");
-                        exit(255);
-                    }
+                    
 
                     //Clean buffer
                     buffer.clear();
@@ -925,7 +934,6 @@ fn main() -> std::io::Result<()> {
                         msg_ciphertext,
                     } = message
                     {
-                        if msg_success {
                             // Use the hash as a key for AES256-GCM-SIV
                             let aes_gcm_key = GenericArray::from_slice(dh_shared_secret.as_bytes());
                             let aes_gcm_cipher = Aes256GcmSiv::new(aes_gcm_key);
@@ -948,6 +956,9 @@ fn main() -> std::io::Result<()> {
                                     exit(255);
                                 });
 
+                            if !msg_success{
+                                exit(255);
+                            }
                             //Deserialize decrypted data into struct AccoundData(id,hash,balance)
                             let account_data: AccountIdHashAmount =
                                 serde_json::from_slice(&plaintext).unwrap();
@@ -963,9 +974,8 @@ fn main() -> std::io::Result<()> {
                             });
 
                             println!("{}", json_result_final);
-                        }
                     }
-                }
+                
             } else {
                 println!("Received wrong message!");
             }
