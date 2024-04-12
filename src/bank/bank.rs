@@ -264,6 +264,18 @@ fn handle_client(
 
                         buffer.clear();
 
+                        if plaintext.is_empty() {
+                            let deposit_response = MessageResponse::DepositResponse {
+                                msg_ciphertext,
+                                msg_nonce,
+                                msg_success: false,
+                            };
+    
+                            //Send second deposit message
+                            serialize_and_write(&mut stream, &deposit_response);
+                            return;
+                        }
+
                         //Deserialize decrypted data
                         let account_data: AccountDataIdDHHash =
                             serde_json::from_slice(&plaintext).unwrap();
@@ -334,6 +346,20 @@ fn handle_client(
                                 &msg_nonce,
                                 &msg_ciphertext,
                             );
+
+                            buffer.clear();
+
+                            if plaintext.is_empty() {
+                                let deposit_response = MessageResponse::DepositResponse {
+                                    msg_ciphertext,
+                                    msg_nonce,
+                                    msg_success: false,
+                                };
+        
+                                //Send second deposit message
+                                serialize_and_write(&mut stream, &deposit_response);
+                                return;
+                            }
 
                             //Deserialize decrypted data into struct AccoundData(id,hash,balance)
                             let account_data: AccountIdHashAmount =
@@ -466,6 +492,18 @@ fn handle_client(
 
                         buffer.clear();
 
+                        if plaintext.is_empty() {
+                            let deposit_response = MessageResponse::DepositResponse {
+                                msg_ciphertext,
+                                msg_nonce,
+                                msg_success: false,
+                            };
+    
+                            //Send second deposit message
+                            serialize_and_write(&mut stream, &deposit_response);
+                            return;
+                        }
+
                         //Deserialize decrypted data
                         let account_data: AccountDataIdDHHash =
                             serde_json::from_slice(&plaintext).unwrap();
@@ -535,6 +573,20 @@ fn handle_client(
                                 &msg_nonce,
                                 &msg_ciphertext,
                             );
+
+                            buffer.clear();
+
+                            if plaintext.is_empty() {
+                                let deposit_response = MessageResponse::DepositResponse {
+                                    msg_ciphertext,
+                                    msg_nonce,
+                                    msg_success: false,
+                                };
+        
+                                //Send second deposit message
+                                serialize_and_write(&mut stream, &deposit_response);
+                                return;
+                            }
 
                             //Deserialize decrypted data into struct AccoundData(id,hash,balance)
                             let account_data: AccountIdHashAmount =
@@ -677,6 +729,18 @@ fn handle_client(
 
                         buffer.clear();
 
+                        if plaintext.is_empty() {
+                            let deposit_response = MessageResponse::DepositResponse {
+                                msg_ciphertext,
+                                msg_nonce,
+                                msg_success: false,
+                            };
+    
+                            //Send second deposit message
+                            serialize_and_write(&mut stream, &deposit_response);
+                            return;
+                        }
+
                         //Deserialize decrypted data
                         let account_data: AccountDataIdDHHash =
                             serde_json::from_slice(&plaintext).unwrap();
@@ -745,6 +809,20 @@ fn handle_client(
                                 &msg_nonce,
                                 &msg_ciphertext,
                             );
+
+                            buffer.clear();
+
+                            if plaintext.is_empty() {
+                                let deposit_response = MessageResponse::DepositResponse {
+                                    msg_ciphertext,
+                                    msg_nonce,
+                                    msg_success: false,
+                                };
+        
+                                //Send second deposit message
+                                serialize_and_write(&mut stream, &deposit_response);
+                                return;
+                            }
 
                             //Deserialize decrypted data into struct AccoundData(id,hash,balance)
                             let account_data: AccountIDHash =
