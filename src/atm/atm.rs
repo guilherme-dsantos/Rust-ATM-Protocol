@@ -77,7 +77,7 @@ fn serialize_and_send<T: serde::Serialize>(stream: &mut TcpStream, message: &T) 
     stream
         .write_all(serialized_with_newline.as_bytes())
         .unwrap_or_else(|e| {
-            eprint!("Error sending message {}", e);
+            eprintln!("Error sending message {}", e);
             exit(63);
         });
 }
@@ -164,7 +164,7 @@ fn main() -> std::io::Result<()> {
             (auth_file, ip_address, port, card_file, account, operation)
         }
         Err(e) => {
-            eprint!("Erro {}", e);
+            eprintln!("Erro {}", e);
             exit(255);
         }
     };
@@ -201,7 +201,7 @@ fn main() -> std::io::Result<()> {
             let file_path = Path::new(&auth_file);
             let string_path = file_path.to_str().unwrap_or_default();
             let bank_extracted_public_key = extract_public_key(string_path).unwrap_or_else(|e| {
-                eprint!("Error reading bank key {}", e);
+                eprintln!("Error reading bank key {}", e);
                 exit(255);
             });
 
