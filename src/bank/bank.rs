@@ -36,7 +36,7 @@ use ctrlc::set_handler;
 
 fn serialize_and_write<T: serde::Serialize>(stream: &mut TcpStream, message: &T) {
     let serialized_message = serde_json::to_string(message).unwrap_or_else(|e| {
-        eprint!("Error serializing message {}", e);
+        eprintln!("Error serializing message {}", e);
         exit(255);
     });
 
@@ -44,7 +44,7 @@ fn serialize_and_write<T: serde::Serialize>(stream: &mut TcpStream, message: &T)
     stream
         .write_all(serialized_with_newline.as_bytes())
         .unwrap_or_else(|e| {
-            eprint!("Error sending message {}", e);
+            eprintln!("Error sending message {}", e);
             exit(255);
         });
 }
@@ -73,7 +73,7 @@ fn handle_client(
                 //Check for Repeated Nonces for Replay Attacks
                 let mut locked_nonces = nonces.lock().unwrap();
                 if locked_nonces.contains(&msg_nonce.to_vec()) {
-                    eprintln!("protocol_error");
+                    println!("protocol_error");
                     return;
                 } else {
                     locked_nonces.push(msg_nonce.to_vec());
@@ -142,7 +142,7 @@ fn handle_client(
                         },
                     )
                     .unwrap_or_else(|e| {
-                        eprint!("Error encrypting with AES GCM {}", e);
+                        eprintln!("Error encrypting with AES GCM {}", e);
                         exit(255);
                     });
 
@@ -212,7 +212,7 @@ fn handle_client(
                 //Check for Repeated Nonces for Replay Attacks
                 let mut locked_nonces = nonces.lock().unwrap();
                 if locked_nonces.contains(&msg_nonce.to_vec()) {
-                    eprintln!("protocol_error");
+                    println!("protocol_error");
                     return;
                 } else {
                     locked_nonces.push(msg_nonce.to_vec());
@@ -224,19 +224,19 @@ fn handle_client(
 
                 //Get user's password
                 let locked_user_table = users_table.lock().unwrap_or_else(|e| {
-                    eprint!("Error accessing users table {}", e);
+                    eprintln!("Error accessing users table {}", e);
                     exit(255);
                 });
 
                 let mut locked_balance_table = balance_table.lock().unwrap_or_else(|e| {
-                    eprint!("Error accessing users table {}", e);
+                    eprintln!("Error accessing users table {}", e);
                     exit(255);
                 });
 
                 let hashed_password_from_table = locked_user_table
                     .get(&msg_id)
                     .unwrap_or_else(|| {
-                        eprint!("ID Account doesn't exist");
+                        eprintln!("ID Account doesn't exist");
                         exit(255);
                     })
                     .to_owned();
@@ -263,7 +263,7 @@ fn handle_client(
                         },
                     )
                     .unwrap_or_else(|e| {
-                        eprint!("283 Error decrypting {}", e);
+                        eprintln!("283 Error decrypting {}", e);
                         exit(255);
                     });
 
@@ -318,7 +318,7 @@ fn handle_client(
                         },
                     )
                     .unwrap_or_else(|e| {
-                        eprint!("Error encrypting with AES GCM {}", e);
+                        eprintln!("Error encrypting with AES GCM {}", e);
                         exit(255);
                     });
 
@@ -343,7 +343,7 @@ fn handle_client(
                 } = message
                 {
                     if locked_nonces.contains(&msg_nonce.to_vec()) {
-                        eprintln!("protocol_error");
+                        println!("protocol_error");
                         return;
                     } else {
                         locked_nonces.push(msg_nonce.to_vec());
@@ -365,7 +365,7 @@ fn handle_client(
                             },
                         )
                         .unwrap_or_else(|e| {
-                            eprint!(" 385 Error decrypting {}", e);
+                            eprintln!(" 385 Error decrypting {}", e);
                             exit(255);
                         });
 
@@ -381,7 +381,7 @@ fn handle_client(
                     let _ = locked_user_table
                         .get(&msg_id)
                         .unwrap_or_else(|| {
-                            eprint!("ID Account doesn't exist");
+                            eprintln!("ID Account doesn't exist");
                             exit(255);
                         })
                         .to_owned();
@@ -389,7 +389,7 @@ fn handle_client(
                     let user_balance = locked_balance_table
                         .get(&msg_id)
                         .unwrap_or_else(|| {
-                            eprint!("ID Account doesn't exist");
+                            eprintln!("ID Account doesn't exist");
                             exit(255);
                         })
                         .to_owned();
@@ -452,7 +452,7 @@ fn handle_client(
                         });
 
                     if !successful_newbalance || !successful_decryption {
-                        eprintln!("protocol_error");
+                        println!("protocol_error");
                         return;
                     }
 
@@ -481,7 +481,7 @@ fn handle_client(
             } => {
                 let mut locked_nonces = nonces.lock().unwrap();
                 if locked_nonces.contains(&msg_nonce.to_vec()) {
-                    eprintln!("protocol_error");
+                    println!("protocol_error");
                     return;
                 } else {
                     locked_nonces.push(msg_nonce.to_vec());
@@ -493,19 +493,19 @@ fn handle_client(
 
                 //Get user's password
                 let locked_user_table = users_table.lock().unwrap_or_else(|e| {
-                    eprint!("Error accessing users table {}", e);
+                    eprintln!("Error accessing users table {}", e);
                     exit(255);
                 });
 
                 let mut locked_balance_table = balance_table.lock().unwrap_or_else(|e| {
-                    eprint!("Error accessing users table {}", e);
+                    eprintln!("Error accessing users table {}", e);
                     exit(255);
                 });
 
                 let hashed_password_from_table = locked_user_table
                     .get(&msg_id)
                     .unwrap_or_else(|| {
-                        eprint!("ID Account doesn't exist");
+                        eprintln!("ID Account doesn't exist");
                         exit(255);
                     })
                     .to_owned();
@@ -532,7 +532,7 @@ fn handle_client(
                         },
                     )
                     .unwrap_or_else(|e| {
-                        eprint!("Error decrypting {}", e);
+                        eprintln!("Error decrypting {}", e);
                         exit(255);
                     });
 
@@ -587,7 +587,7 @@ fn handle_client(
                         },
                     )
                     .unwrap_or_else(|e| {
-                        eprint!("Error encrypting with AES GCM {}", e);
+                        eprintln!("Error encrypting with AES GCM {}", e);
                         exit(255);
                     });
 
@@ -611,7 +611,7 @@ fn handle_client(
                 } = message
                 {
                     if locked_nonces.contains(&msg_nonce.to_vec()) {
-                        eprintln!("protocol_error");
+                        println!("protocol_error");
                         return;
                     } else {
                         locked_nonces.push(msg_nonce.to_vec());
@@ -633,7 +633,7 @@ fn handle_client(
                             },
                         )
                         .unwrap_or_else(|e| {
-                            eprint!("Error decrypting {}", e);
+                            eprintln!("Error decrypting {}", e);
                             exit(255);
                         });
 
@@ -649,7 +649,7 @@ fn handle_client(
                     let _ = locked_user_table
                         .get(&msg_id)
                         .unwrap_or_else(|| {
-                            eprint!("ID Account doesn't exist");
+                            eprintln!("ID Account doesn't exist");
                             exit(255);
                         })
                         .to_owned();
@@ -657,7 +657,7 @@ fn handle_client(
                     let user_balance = locked_balance_table
                         .get(&msg_id)
                         .unwrap_or_else(|| {
-                            eprint!("ID Account doesn't exist");
+                            eprintln!("ID Account doesn't exist");
                             exit(255);
                         })
                         .to_owned();
@@ -722,7 +722,7 @@ fn handle_client(
                         });
 
                     if !successful_withdraw || !successful_decryption {
-                        eprintln!("protocol_error");
+                        println!("protocol_error");
                         return;
                     }
                     if !positive_balance {
@@ -759,7 +759,7 @@ fn handle_client(
             } => {
                 let mut locked_nonces = nonces.lock().unwrap();
                 if locked_nonces.contains(&msg_nonce.to_vec()) {
-                    eprintln!("protocol_error");
+                    println!("protocol_error");
                     return;
                 } else {
                     locked_nonces.push(msg_nonce.to_vec());
@@ -771,19 +771,19 @@ fn handle_client(
 
                 //Get user's password
                 let locked_user_table = users_table.lock().unwrap_or_else(|e| {
-                    eprint!("Error accessing users table {}", e);
+                    eprintln!("Error accessing users table {}", e);
                     exit(255);
                 });
 
                 let locked_balance_table = balance_table.lock().unwrap_or_else(|e| {
-                    eprint!("Error accessing users table {}", e);
+                    eprintln!("Error accessing users table {}", e);
                     exit(255);
                 });
 
                 let hashed_password_from_table = locked_user_table
                     .get(&msg_id)
                     .unwrap_or_else(|| {
-                        eprint!("ID Account doesn't exist");
+                        eprintln!("ID Account doesn't exist");
                         exit(255);
                     })
                     .to_owned();
@@ -810,7 +810,7 @@ fn handle_client(
                         },
                     )
                     .unwrap_or_else(|e| {
-                        eprint!("Error decrypting {}", e);
+                        eprintln!("Error decrypting {}", e);
                         exit(255);
                     });
 
@@ -865,7 +865,7 @@ fn handle_client(
                         },
                     )
                     .unwrap_or_else(|e| {
-                        eprint!("Error encrypting with AES GCM {}", e);
+                        eprintln!("Error encrypting with AES GCM {}", e);
                         exit(255);
                     });
 
@@ -888,7 +888,7 @@ fn handle_client(
                 } = message
                 {
                     if locked_nonces.contains(&msg_nonce.to_vec()) {
-                        eprintln!("protocol_error");
+                        println!("protocol_error");
                         return;
                     } else {
                         locked_nonces.push(msg_nonce.to_vec());
@@ -910,7 +910,7 @@ fn handle_client(
                             },
                         )
                         .unwrap_or_else(|e| {
-                            eprint!("Error decrypting {}", e);
+                            eprintln!("Error decrypting {}", e);
                             exit(255);
                         });
 
@@ -925,7 +925,7 @@ fn handle_client(
                     let _ = locked_user_table
                         .get(&msg_id)
                         .unwrap_or_else(|| {
-                            eprint!("ID Account doesn't exist");
+                            eprintln!("ID Account doesn't exist");
                             exit(255);
                         })
                         .to_owned();
@@ -933,7 +933,7 @@ fn handle_client(
                     let user_balance = locked_balance_table
                         .get(&msg_id)
                         .unwrap_or_else(|| {
-                            eprint!("ID Account doesn't exist");
+                            eprintln!("ID Account doesn't exist");
                             exit(255);
                         })
                         .to_owned();
@@ -973,7 +973,7 @@ fn handle_client(
                             },
                         )
                         .unwrap_or_else(|e| {
-                            eprint!("Error encrypting with AES GCM {}", e);
+                            eprintln!("Error encrypting with AES GCM {}", e);
                             exit(255);
                         });
 
@@ -995,7 +995,7 @@ fn handle_client(
             }
         },
         Err(e) => {
-            println!("Error {}", e);
+            eprintln!("Error {}", e);
         }
     }
 }
@@ -1040,7 +1040,7 @@ fn main() -> std::io::Result<()> {
     //Create bank.auth file, expects error if bank.auth exists
     let file_path = Path::new(&auth_file);
     if file_path.exists() {
-        eprint!("Error auth exists");
+        eprintln!("Error auth exists");
         exit(255);
     } else {
         match fs::write(file_path, "bank.auth\n") {
@@ -1064,11 +1064,9 @@ fn main() -> std::io::Result<()> {
     });
 
     set_handler(move || {
-        println!("Received SIGTERM, exiting...");
+        //println!("Received SIGTERM, exiting...");
         process::exit(0);
     }).expect("Error setting Ctrl-C handler");
-
-    println!("Waiting for SIGTERM...");
 
     loop {
         match listener.accept() {

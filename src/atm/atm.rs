@@ -69,7 +69,7 @@ fn create_card_file(file_path: &str) {
 
 fn serialize_and_send<T: serde::Serialize>(stream: &mut TcpStream, message: &T) {
     let serialized_message = serde_json::to_string(message).unwrap_or_else(|e| {
-        eprint!("Error serializing message {}", e);
+        eprintln!("Error serializing message {}", e);
         exit(255);
     });
 
@@ -78,7 +78,7 @@ fn serialize_and_send<T: serde::Serialize>(stream: &mut TcpStream, message: &T) 
         .write_all(serialized_with_newline.as_bytes())
         .unwrap_or_else(|e| {
             eprint!("Error sending message {}", e);
-            exit(255);
+            exit(63);
         });
 }
 
@@ -280,7 +280,7 @@ fn main() -> std::io::Result<()> {
                             },
                         )
                         .unwrap_or_else(|e| {
-                            eprint!("Error decrypting {}", e);
+                            eprintln!("Error decrypting {}", e);
                             exit(63);
                         });
 
@@ -302,7 +302,7 @@ fn main() -> std::io::Result<()> {
                         eprintln!("Couldn't write to file: {}", e);
                     }
             } else {
-                println!("Received wrong message!");
+                eprintln!("Received wrong message!");
             }
 
             let json_result = json!({
@@ -363,7 +363,7 @@ fn main() -> std::io::Result<()> {
                     },
                 )
                 .unwrap_or_else(|e| {
-                    eprint!("Error encrypting with AES GCM {}", e);
+                    eprintln!("Error encrypting with AES GCM {}", e);
                     exit(63);
                 });
 
@@ -409,7 +409,7 @@ fn main() -> std::io::Result<()> {
                             },
                         )
                         .unwrap_or_else(|e| {
-                            eprint!("Error decrypting {}", e);
+                            eprintln!("Error decrypting {}", e);
                             exit(63);
                         });
 
@@ -456,7 +456,7 @@ fn main() -> std::io::Result<()> {
                             },
                         )
                         .unwrap_or_else(|e| {
-                            eprint!("Error encrypting with AES GCM {}", e);
+                            eprintln!("Error encrypting with AES GCM {}", e);
                             exit(63);
                         });
 
@@ -498,7 +498,7 @@ fn main() -> std::io::Result<()> {
                                     },
                                 )
                                 .unwrap_or_else(|e| {
-                                    eprint!("Error decrypting {}", e);
+                                    eprintln!("Error decrypting {}", e);
                                     exit(63);
                                 });
 
@@ -519,7 +519,7 @@ fn main() -> std::io::Result<()> {
                     }
                 
             } else {
-                println!("Received wrong message!");
+                eprintln!("Received wrong message!");
             }
         }
 
@@ -578,7 +578,7 @@ fn main() -> std::io::Result<()> {
                     },
                 )
                 .unwrap_or_else(|e| {
-                    eprint!("Error encrypting with AES GCM {}", e);
+                    eprintln!("Error encrypting with AES GCM {}", e);
                     exit(63);
                 });
 
@@ -622,7 +622,7 @@ fn main() -> std::io::Result<()> {
                             },
                         )
                         .unwrap_or_else(|e| {
-                            eprint!("Error decrypting {}", e);
+                            eprintln!("Error decrypting {}", e);
                             exit(63);
                         });
 
@@ -671,7 +671,7 @@ fn main() -> std::io::Result<()> {
                             },
                         )
                         .unwrap_or_else(|e| {
-                            eprint!("Error encrypting with AES GCM {}", e);
+                            eprintln!("Error encrypting with AES GCM {}", e);
                             exit(63);
                         });
 
@@ -714,7 +714,7 @@ fn main() -> std::io::Result<()> {
                                     },
                                 )
                                 .unwrap_or_else(|e| {
-                                    eprint!("Error decrypting {}", e);
+                                    eprintln!("Error decrypting {}", e);
                                     exit(63);
                                 });
 
@@ -736,7 +736,7 @@ fn main() -> std::io::Result<()> {
                     }
                 
             } else {
-                println!("Received wrong message!");
+                eprintln!("Received wrong message!");
             }
         }
 
@@ -795,7 +795,7 @@ fn main() -> std::io::Result<()> {
                     },
                 )
                 .unwrap_or_else(|e| {
-                    eprint!("Error encrypting with AES GCM {}", e);
+                    eprintln!("Error encrypting with AES GCM {}", e);
                     exit(63);
                 });
 
@@ -839,7 +839,7 @@ fn main() -> std::io::Result<()> {
                             },
                         )
                         .unwrap_or_else(|e| {
-                            eprint!("Error decrypting {}", e);
+                            eprintln!("Error decrypting {}", e);
                             exit(63);
                         });
 
@@ -889,7 +889,7 @@ fn main() -> std::io::Result<()> {
                             },
                         )
                         .unwrap_or_else(|e| {
-                            eprint!("Error encrypting with AES GCM {}", e);
+                            eprintln!("Error encrypting with AES GCM {}", e);
                             exit(63);
                         });
 
@@ -931,7 +931,7 @@ fn main() -> std::io::Result<()> {
                                     },
                                 )
                                 .unwrap_or_else(|e| {
-                                    eprint!("Error decrypting {}", e);
+                                    eprintln!("Error decrypting {}", e);
                                     exit(63);
                                 });
 
@@ -952,7 +952,7 @@ fn main() -> std::io::Result<()> {
                     }
                 
             } else {
-                println!("Received wrong message!");
+                eprintln!("Received wrong message!");
             }
         }
     }
