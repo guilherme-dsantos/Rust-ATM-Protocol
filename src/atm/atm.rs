@@ -271,7 +271,7 @@ fn main() -> std::io::Result<()> {
                     // Additional associated data (AAD)
                     let aad = [aes_gcm_nonce.to_vec(), account.as_bytes().to_vec()].concat();
 
-                    let _ = aes_gcm_cipher
+                    let plaintext = aes_gcm_cipher
                         .decrypt(
                             aes_gcm_nonce,
                             aead::Payload {
@@ -288,9 +288,13 @@ fn main() -> std::io::Result<()> {
                         exit(255);
                     }
                     //Deserialize decrypted data into struct AccoundData(id,hash,balance)
-                    //let account_data: AccountIdHashAmount =
-                    //    serde_json::from_slice(&plaintext).unwrap();
+                    let account_data: AccountIdHashAmount =
+                        serde_json::from_slice(&plaintext).unwrap();
 
+                    if account_data.hash != password_hash_slice {
+                        eprintln!("Detected MITM attack");
+                        exit(255);
+                    }
 
                     //Clean buffer
                     buffer.clear();
@@ -419,6 +423,11 @@ fn main() -> std::io::Result<()> {
                     //Deserialize decrypted data into struct AccoundData(id,hash,balance)
                     let account_data: AccountDHHash = serde_json::from_slice(&plaintext).unwrap();
 
+                    if account_data.hash != password_hash_bytes {
+                        eprintln!("Something is wron the hashes aren't identical");
+                        exit(255);
+                    }
+
                     //Clean buffer
                     buffer.clear();
 
@@ -489,7 +498,7 @@ fn main() -> std::io::Result<()> {
                             let aad =
                                 [aes_gcm_nonce.to_vec(), account.as_bytes().to_vec()].concat();
 
-                            let _ = aes_gcm_cipher
+                            let plaintext = aes_gcm_cipher
                                 .decrypt(
                                     aes_gcm_nonce,
                                     aead::Payload {
@@ -506,8 +515,13 @@ fn main() -> std::io::Result<()> {
                                 exit(255);
                             }
                             //Deserialize decrypted data into struct AccoundData(id,hash,balance)
-                            //let account_data: AccountIdHashAmount =
-                            //    serde_json::from_slice(&plaintext).unwrap();
+                            let account_data: AccountIdHashAmount =
+                            serde_json::from_slice(&plaintext).unwrap();
+
+                            if account_data.hash != password_hash_bytes {
+                                eprintln!("Something is wron the hashes aren't identical");
+                                exit(255);
+                            }
 
                             let json_result_final = json!({
                                 "account": account,
@@ -705,7 +719,7 @@ fn main() -> std::io::Result<()> {
                             let aad =
                                 [aes_gcm_nonce.to_vec(), account.as_bytes().to_vec()].concat();
 
-                            let _ = aes_gcm_cipher
+                            let plaintext = aes_gcm_cipher
                                 .decrypt(
                                     aes_gcm_nonce,
                                     aead::Payload {
@@ -722,9 +736,13 @@ fn main() -> std::io::Result<()> {
                                 exit(255);
                             }
                             //Deserialize decrypted data into struct AccoundData(id,hash,balance)
-                            //let account_data: AccountIdHashAmount =
-                            //  serde_json::from_slice(&plaintext).unwrap();
+                            let account_data: AccountIdHashAmount =
+                              serde_json::from_slice(&plaintext).unwrap();
 
+                            if &account_data.hash != password_hash_bytes {
+                                eprintln!("Something is wron the hashes aren't identical");
+                                exit(255);
+                            }
 
                             let json_result_final = json!({
                                 "account": account,
@@ -942,6 +960,10 @@ fn main() -> std::io::Result<()> {
                             let account_data: AccountIdHashAmount =
                                 serde_json::from_slice(&plaintext).unwrap();
 
+                            if &account_data.hash != password_hash_bytes {
+                                eprintln!("Something is wron the hashes aren't identical");
+                                exit(255);
+                            }
 
                             let json_result_final = json!({
                                 "account": account,
