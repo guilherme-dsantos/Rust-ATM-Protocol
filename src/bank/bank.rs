@@ -12,7 +12,6 @@ use rsa::{
 };
 use serde_json::json;
 use std::{
-    collections::HashMap,
     fs,
     io::{BufRead, BufReader, Write},
     net::{SocketAddr, TcpListener, TcpStream},
@@ -32,6 +31,7 @@ use utils::{
 };
 
 use ctrlc::set_handler;
+use dashmap::DashMap;
 use std::process;
 
 fn encrypt_message(key: &[u8], data_to_encrypt: &str, nonce: &[u8]) -> Vec<u8> {
@@ -90,8 +90,8 @@ fn handle_client(
     mut stream: TcpStream,
     _addr: SocketAddr,
     bank_private_key: Arc<RsaPrivateKey>,
-    users_table: Arc<Mutex<HashMap<String, [u8; 32]>>>,
-    balance_table: Arc<Mutex<HashMap<String, u64>>>,
+    users_table: Arc<DashMap<String, [u8; 32]>>,
+    balance_table: Arc<DashMap<String, u64>>,
     nonces: Arc<Mutex<Vec<Vec<u8>>>>,
 ) {
     let mut buffer = Vec::new();
@@ -111,11 +111,11 @@ fn handle_client(
                     } => {
                         //Check for Repeated Nonces for Replay Attacks
                         let mut locked_nonces = nonces.lock().unwrap();
-                        if locked_nonces.contains(&msg_nonce.to_vec()) {
+                        if locked_nonces.contains(&msg_nonce) {
                             println!("protocol_error");
                             return;
                         } else {
-                            locked_nonces.push(msg_nonce.to_vec());
+                            locked_nonces.push(msg_nonce.clone());
                         }
 
                         //Decrypt received data
@@ -169,33 +169,30 @@ fn handle_client(
 
                         //Check if account is already registred, register account if not in the users_table
                         let mut successful_user_regist = true;
-                        let mut locked_users_table = users_table.lock().unwrap();
-                        if let std::collections::hash_map::Entry::Vacant(e) =
-                            locked_users_table.entry(account_id.clone())
-                        {
-                            e.insert(hashed_password);
-                        } else {
+                        if let Some(_value) = users_table.get(&account_id) {
+                            eprintln!("User already registered");
                             successful_user_regist = false;
+                        } else {
+                            users_table.insert(account_id.clone(), hashed_password);
                         }
 
                         //Insert account id and balance in the balance_table
                         let mut successful_balance_regist = true;
-                        let mut locked_balance_table = balance_table.lock().unwrap();
-                        if let std::collections::hash_map::Entry::Vacant(e) =
-                            locked_balance_table.entry(account_id.clone())
-                        {
-                            e.insert(balanceu64);
-                        } else {
+                        if let Some(_value) = balance_table.get(&account_id) {
+                            eprintln!("User already registered");
                             successful_balance_regist = false;
+                        } else {
+                            balance_table.insert(account_id.clone(), balanceu64);
                         }
 
                         //Rollback
                         if successful_user_regist && !successful_balance_regist {
-                            locked_users_table.remove_entry(&account_id);
+                            users_table.remove(&account_id);
                         } else if !successful_user_regist && successful_balance_regist {
-                            locked_balance_table.remove_entry(&account_id);
-                        } else if !successful_balance_regist || !successful_user_regist {
-                            //eprintln!("protocol_error");
+                            balance_table.remove(&account_id);
+                        }
+
+                        if !successful_balance_regist || !successful_user_regist {
                             let registration_response = MessageResponse::RegistrationResponse {
                                 msg_success: false,
                                 msg_ciphertext: ciphertext,
@@ -243,16 +240,11 @@ fn handle_client(
                         let bank_secret = EphemeralSecret::random_from_rng(csprng);
                         let bank_public = PublicKey::from(&bank_secret);
 
-                        //Get user's password
-                        let locked_user_table = users_table.lock().unwrap();
+                        let hashed_password_from_table: [u8; 32];
 
-                        let mut locked_balance_table = balance_table.lock().unwrap();
-
-                        let hashed_password_from_table =
-                            locked_user_table.get(&msg_id).unwrap().to_owned();
-
-                        if !locked_user_table.contains_key(&msg_id) {
-                            eprintln!("Received invalid message from ATM, maybe MITM...");
+                        if let Some(value_ref) = users_table.get(&msg_id) {
+                            hashed_password_from_table = *value_ref.value();
+                        } else {
                             return;
                         }
 
@@ -270,7 +262,7 @@ fn handle_client(
                                 msg_nonce,
                                 msg_success: false,
                             };
-    
+
                             //Send second deposit message
                             serialize_and_write(&mut stream, &deposit_response);
                             return;
@@ -355,7 +347,7 @@ fn handle_client(
                                     msg_nonce,
                                     msg_success: false,
                                 };
-        
+
                                 //Send second deposit message
                                 serialize_and_write(&mut stream, &deposit_response);
                                 return;
@@ -370,21 +362,23 @@ fn handle_client(
                                 return;
                             }
 
-                            let _ = locked_user_table.get(&msg_id).unwrap().to_owned();
+                            let user_balance;
 
-                            let user_balance =
-                                locked_balance_table.get(&msg_id).unwrap().to_owned();
+                            if let Some(val_ref) = balance_table.get(&msg_id) {
+                                user_balance = *val_ref.value();
+                            } else {
+                                eprintln!("User not found");
+                                return;
+                            }
 
                             let old_balance = user_balance;
                             let calculate_balance: u64 = account_data.amount.parse().unwrap();
                             let new_balance = user_balance + calculate_balance;
 
-                            let mut successful_newbalance = true;
-                            match locked_balance_table.get_mut(&account_data.id) {
-                                Some(value) => *value = new_balance,
-                                None => {
-                                    successful_newbalance = false;
-                                }
+                            if let Some(mut value_ref) = balance_table.get_mut(&account_data.id) {
+                                *value_ref = new_balance;
+                            } else {
+                                return;
                             }
 
                             buffer.clear();
@@ -420,18 +414,17 @@ fn handle_client(
                                 )
                                 .unwrap_or_else(|_| {
                                     //Rollback
-                                    if successful_newbalance {
-                                        if let Some(value) =
-                                            locked_balance_table.get_mut(&account_data.id)
-                                        {
-                                            *value = old_balance;
-                                        }
+
+                                    if let Some(mut value) = balance_table.get_mut(&account_data.id)
+                                    {
+                                        *value = old_balance;
                                     }
+
                                     successful_decryption = false;
                                     vec![]
                                 });
 
-                            if !successful_newbalance || !successful_decryption {
+                            if !successful_decryption {
                                 println!("protocol_error");
                                 return;
                             }
@@ -471,16 +464,11 @@ fn handle_client(
                         let bank_secret = EphemeralSecret::random_from_rng(csprng);
                         let bank_public = PublicKey::from(&bank_secret);
 
-                        //Get user's password
-                        let locked_user_table = users_table.lock().unwrap();
+                        let hashed_password_from_table;
 
-                        let mut locked_balance_table = balance_table.lock().unwrap();
-
-                        let hashed_password_from_table =
-                            locked_user_table.get(&msg_id).unwrap().to_owned();
-
-                        if !locked_user_table.contains_key(&msg_id) {
-                            eprintln!("Received invalid message from ATM, maybe MITM...");
+                        if let Some(value_ref) = users_table.get(&msg_id) {
+                            hashed_password_from_table = *value_ref.value();
+                        } else {
                             return;
                         }
 
@@ -498,7 +486,7 @@ fn handle_client(
                                 msg_nonce,
                                 msg_success: false,
                             };
-    
+
                             //Send second deposit message
                             serialize_and_write(&mut stream, &deposit_response);
                             return;
@@ -582,7 +570,7 @@ fn handle_client(
                                     msg_nonce,
                                     msg_success: false,
                                 };
-        
+
                                 //Send second deposit message
                                 serialize_and_write(&mut stream, &deposit_response);
                                 return;
@@ -597,10 +585,13 @@ fn handle_client(
                                 return;
                             }
 
-                            let _ = locked_user_table.get(&msg_id).unwrap().to_owned();
-
-                            let user_balance =
-                                locked_balance_table.get(&msg_id).unwrap().to_owned();
+                            let user_balance;
+                            if let Some(key) = balance_table.get(&msg_id) {
+                                user_balance = *key.value();
+                            } else {
+                                eprintln!("User not found");
+                                return;
+                            }
 
                             let old_balance = user_balance;
                             let calculate_balance: u64 = account_data.amount.parse().unwrap();
@@ -611,8 +602,8 @@ fn handle_client(
                                 positive_balance = false;
                             } else {
                                 let new_balance = user_balance - calculate_balance;
-                                match locked_balance_table.get_mut(&account_data.id) {
-                                    Some(value) => *value = new_balance,
+                                match balance_table.get_mut(&account_data.id) {
+                                    Some(mut value) => *value = new_balance,
                                     None => successful_withdraw = false,
                                 }
                             }
@@ -651,8 +642,8 @@ fn handle_client(
                                 .unwrap_or_else(|_| {
                                     successful_decryption = false;
                                     if successful_withdraw {
-                                        if let Some(value) =
-                                            locked_balance_table.get_mut(&account_data.id)
+                                        if let Some(mut value) =
+                                            balance_table.get_mut(&account_data.id)
                                         {
                                             *value = old_balance;
                                         }
@@ -708,16 +699,11 @@ fn handle_client(
                         let bank_secret = EphemeralSecret::random_from_rng(csprng);
                         let bank_public = PublicKey::from(&bank_secret);
 
-                        //Get user's password
-                        let locked_user_table = users_table.lock().unwrap();
+                        let hashed_password_from_table;
 
-                        let locked_balance_table = balance_table.lock().unwrap();
-
-                        let hashed_password_from_table =
-                            locked_user_table.get(&msg_id).unwrap().to_owned();
-
-                        if !locked_user_table.contains_key(&msg_id) {
-                            eprintln!("Received invalid message from ATM, maybe MITM...");
+                        if let Some(value_ref) = users_table.get(&msg_id) {
+                            hashed_password_from_table = *value_ref.value();
+                        } else {
                             return;
                         }
 
@@ -735,7 +721,7 @@ fn handle_client(
                                 msg_nonce,
                                 msg_success: false,
                             };
-    
+
                             //Send second deposit message
                             serialize_and_write(&mut stream, &deposit_response);
                             return;
@@ -818,7 +804,7 @@ fn handle_client(
                                     msg_nonce,
                                     msg_success: false,
                                 };
-        
+
                                 //Send second deposit message
                                 serialize_and_write(&mut stream, &deposit_response);
                                 return;
@@ -833,10 +819,13 @@ fn handle_client(
                                 return;
                             }
 
-                            let _ = locked_user_table.get(&msg_id).unwrap().to_owned();
+                            let user_balance;
 
-                            let user_balance =
-                                locked_balance_table.get(&msg_id).unwrap().to_owned();
+                            if let Some(value_ref) = balance_table.get(&msg_id) {
+                                user_balance = *value_ref.value();
+                            } else {
+                                return;
+                            }
 
                             buffer.clear();
 
@@ -892,8 +881,8 @@ fn handle_client(
 }
 
 fn main() -> std::io::Result<()> {
-    let users_table: Arc<Mutex<HashMap<String, [u8; 32]>>> = Arc::new(Mutex::new(HashMap::new()));
-    let balance_table: Arc<Mutex<HashMap<String, u64>>> = Arc::new(Mutex::new(HashMap::new()));
+    let users_table: Arc<DashMap<String, [u8; 32]>> = Arc::new(DashMap::new());
+    let balance_table: Arc<DashMap<String, u64>> = Arc::new(DashMap::new());
     let nonces = Arc::new(Mutex::new(Vec::<Vec<u8>>::new()));
 
     let (port, auth_file): (String, String) = match bank_parser::cli() {

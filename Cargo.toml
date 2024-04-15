@@ -19,6 +19,7 @@ cipher = "0.4.4"
 aes-gcm-siv = "0.11.1"
 blake3 = "1.5.1"
 ctrlc = { version = "3.4.4", features = ["termination"] }
+dashmap = "5.5.3"
 
 [[bin]]
 name = "atm"
