@@ -57,4 +57,3 @@ To run the `atm` executable, use one of the following commands depending on the 
   ```
 
 In these commands, replace `<auth-file>` with the path to the file containing the authentication information, `<ip-address>` with the IP address of the bank server, `<port>` with the port number of the bank server, `<card-file>` with the path to the file containing the card information, `<account>` with the account name, `<balance>` with the balance amount, and `<amount>` with the deposit or withdrawal amount.
-```
