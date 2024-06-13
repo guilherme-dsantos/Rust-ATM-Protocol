@@ -40,7 +40,7 @@ Messages exchanged between the ATM and the bank are encrypted using AES-GCM. Thi
 - **RSA:** Used for encrypting messages to ensure that only the intended recipient can decrypt them.
 - **AES-GCM (Galois/Counter Mode):** Provides authenticated encryption, ensuring data confidentiality and integrity.
 - **Blake3:** Used for generating HMACs, ensuring data integrity.
-- **ECDH (Elliptic Curve Diffie-Hellman):** Unnecessary, will be removed in the future.
+- **ECDH (Elliptic Curve Diffie-Hellman):** Ensures forward secrecy.
 
 ### Specific Attacks Countered
 
@@ -205,7 +205,7 @@ In these commands, replace `<auth-file>` with the path to the file containing th
 
 1. Non-Repudiation: Not implemented due to time constraints.
 2. Generate timestamp based nonces. https://docs.rs/textnonce/latest/textnonce/
-3. Remove unnecessary DH and other minor improvements
+3. Add timestamps to each message
 
 ## Authors
 - Guilherme Santos (fc62533)
